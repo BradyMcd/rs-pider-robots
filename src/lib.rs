@@ -1,5 +1,6 @@
 //
-// TODO: Getters, Casing anomalies, Tests, Documentation, HACK comments
+// TODO: Getters, Tests, Documentation/Code Rearrangement, HACK comments
+// TODO: RE: Code Rearrangement: Isolate the parsing logic from the main structure
 
 extern crate reqwest;
 extern crate base_url;
@@ -21,13 +22,13 @@ pub enum Anomaly {
     /// or the line following. Context strings may be observed twice if a block comment is placed above
     /// a line with a directive and comment.
     Comment( String /*The comment*/, String /*The context*/ ),
-    /// Rules whose names are not in the normal casing format, ie. "allow" rather than "Allow"
-    Casing( String, BaseUrl ), // mostly here to guage if this type of error is common
+    /// Rules whose names are not in the normal casing format, ie. "foo" rather than "Foo"
+    Casing( String, String ), // mostly here to guage if this type of error is common
     /// A Rule located outside of a User-agent section
     OrphanRule( Rule ),
     /// A User-agent line nested in another User-agent section which already contains one or more Rules
     RecursedUserAgent( String /*The agent's name*/ ),
-    /// Any known directive not noramlly found in a User-agent section.
+    /// Any known directive not noramlly found in a User-agent section
     MissSectionedDirective( String, String ),
     /// Any directive which is unimplemented or otherwise unknown
     UnknownDirective( String, String ),
@@ -178,6 +179,7 @@ impl R_State {
 
         match self {
             R_State::Comment( u, mut s ) => {
+                s.push_str( "\n" );
                 s.push_str( line );
                 R_State::Comment( u, s )
             },
@@ -189,18 +191,18 @@ impl R_State {
 
         match self {
             R_State::Comment( mut u, s ) => {
-                u.add_comment( s.to_string( ), context.to_string( ) );
-                u.add_comment( comment.to_string( ), context.to_string( ) );
+                u.add_comment( context.to_string( ), s.to_string( ) );
+                u.add_comment( context.to_string( ), comment.to_string( ) );
                 R_State::Normal( u )
             }
             R_State::Normal( mut u ) => {
-                u.add_comment( comment.to_string( ), context.to_string( ) );
+                u.add_comment( context.to_string( ), comment.to_string( ) );
                 R_State::Normal( u )
             }
         }
     }
 
-    fn directive_line( self, directive: &str, argument: &str ) -> Self {
+    fn directive_line( self, mut directive: String, argument: String ) -> Self {
 
         let mut user_agent;
 
@@ -215,7 +217,14 @@ impl R_State {
             }
         }
 
-        match parse_directive( directive, argument ) {
+        //HACK: Space saving is possible by moving the Casing anomaly check
+        if directive.starts_with( | c: char |( c.is_lowercase( ) ) ) {
+            user_agent.add_anomaly( Anomaly::Casing( directive.to_string( ), argument.to_string( ) ) );
+            //NOTE: We don't ignore the casing anomaly, our goal is to be as permissive as possible
+            directive.get_mut(0..1).map( | c |{ c.make_ascii_uppercase( ); &*c } );
+        }
+
+        match parse_directive( &directive, &argument ) {
             DirectiveResult::Ok_UserAgent( ua ) => {
                 user_agent.add_agent( ua );
                 R_State::Normal( user_agent )
@@ -277,6 +286,7 @@ impl State {
 
         match self {
             State::Comment( r, mut s ) => {
+                s.push_str( "\n" );
                 s.push_str( line );
                 State::Comment( r, s )
             },
@@ -307,7 +317,7 @@ impl State {
         }
     }
 
-    fn directive_line( self, directive: &str , argument: &str ) -> Self {
+    fn directive_line( self, mut directive: String , argument: String ) -> Self {
 
         let mut robots;
 
@@ -326,7 +336,14 @@ impl State {
             }
         }
 
-        match parse_directive( directive, argument ) {
+        //HACK: Space saving is possible by moving the Casing anomaly check
+        if directive.starts_with( | c: char |( c.is_lowercase( ) ) ) {
+            robots.add_anomaly( Anomaly::Casing( directive.to_string( ), argument.to_string( ) ) );
+            //NOTE: We don't ignore the casing anomaly, our goal is to be as permissive as possible
+            directive.get_mut(0..1).map( | c |{ c.make_ascii_uppercase( ); &*c } );
+        }
+
+        match parse_directive( &directive, &argument ) {
             DirectiveResult::Ok_UserAgent( ua ) => {
                 State::Agent( robots, R_State::Normal( UserAgent::new( ua ) ) )
             }
@@ -442,6 +459,7 @@ impl RobotsParser {
         Self::parse( host, text )
     }
 
+    //HACK: Best entry point into the code, understanding this is the key to adding any feature
     pub fn parse< S: Into<String> >( host: BaseUrl, text: S ) -> RobotsParser {
         let text = text.into( ); //Not a one-liner to appease lifetimes
         let lines = text.lines( );
@@ -483,7 +501,8 @@ impl RobotsParser {
              ******/
             if line.contains( ":" ) {
                 let ( l, r ) = line.split_at( line.find( ":" ).unwrap( ) );
-                state = state.directive_line( l, r.trim_left_matches( ':' ) );
+                state = state.directive_line( l.to_string( ),
+                                              r.trim_left_matches( ':' ).to_string( ) );
             } else {
                 /***********
                  * Everything else
