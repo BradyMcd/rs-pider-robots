@@ -1,12 +1,13 @@
 //
 // TODO: Getters, Tests, Documentation/Code Rearrangement, HACK comments
 // TODO: RE: Code Rearrangement: Isolate the parsing logic from the main structure
-
+// TODO: Sort rule entries by order of specificity, that means User-agent sections go wildcard first as do rules
 extern crate reqwest;
 extern crate base_url;
 extern crate try_from;
 
 use std::convert::*;
+use std::cmp::Ordering;
 
 use reqwest::{ Response };
 
@@ -28,6 +29,8 @@ pub enum Anomaly {
     OrphanRule( Rule ),
     /// A User-agent line nested in another User-agent section which already contains one or more Rules
     RecursedUserAgent( String /*The agent's name*/ ),
+    /// A User-agent which contains both a wildcard and a specific User-agent name
+    RedundantWildcardUserAgent( String ),
     /// Any known directive not noramlly found in a User-agent section
     MissSectionedDirective( String, String ),
     /// Any directive which is unimplemented or otherwise unknown
@@ -37,9 +40,9 @@ pub enum Anomaly {
     UnknownFormat( String ),
 }
 
-pub enum Rule { //TODO: consider rolling a Path type to deal with the BaseUrl to String interface
-    AllowAll( String ),
-    DisallowAll( String ),
+/// Represents a Rule line found in a User-agent section
+#[derive( Clone, PartialEq, Eq )]
+pub enum Rule {
     Allow( String ),
     Disallow( String ),
     /* TODO:
@@ -49,12 +52,14 @@ pub enum Rule { //TODO: consider rolling a Path type to deal with the BaseUrl to
 
 }
 
+/// A User-agent section and all names, rules and anomalies associated
 pub struct UserAgent {
     names: Vec< String >,
     rules: Vec< Rule >,
     anomalies: Vec< Anomaly >,
 }
 
+/// Represents a parsed robots.txt file
 pub struct RobotsParser {
     host: BaseUrl,
     sitemaps: Vec<BaseUrl>,
@@ -62,6 +67,7 @@ pub struct RobotsParser {
     anomalies: Vec< Anomaly >,
 }
 
+//--SNIP--
 enum R_State { //Recursed state; useragent sections don't recurse, they add
     Comment( UserAgent, String ),
     Normal( UserAgent ),
@@ -107,22 +113,66 @@ impl Rule {
     fn new( allowance: bool, path: String ) -> Rule {
         match allowance {
             true => {
-                if path == "*" {
-                    Rule::AllowAll( path )
-                } else {
-                    Rule::Allow( path )
-                }
+                Rule::Allow( path )
             }
             false => {
-                if path == "*" {
-                    Rule::DisallowAll( path )
-                } else {
-                    Rule::Disallow( path )
-                }
+                Rule::Disallow( path )
             }
         }
     }
 
+    /***********
+     * Ordering Helpers
+     ******/
+
+    fn is_allow( &self ) -> bool {
+        match self {
+            Rule::Allow( _ ) => { true }
+            _ => { false }
+        }
+    }
+
+    fn specificity( &self ) -> usize {
+        match self {
+            Rule::Allow( path ) | Rule::Disallow( path ) => {
+                path.split( '/' ).filter( | segment |{ !segment.is_empty( ) } ).count( )
+            }
+        }
+    }
+
+}
+
+/// Less specific rules are considered to be greater than more specific counterparts so that they
+/// will be considered first by the permissions logic. The more path segments a Rule contains the
+/// more specific it is. Allow rules are also considered greater than Disallow rules all other
+/// things being equal, again, this is so that equally specific Disallow rules are handled last and
+/// "overwrite" their Allow counterparts since that behavior is in the spirit of what a robots.txt
+/// is for, to dictate which directories are off limits to a web robot.
+impl PartialOrd for Rule {
+
+    fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
+        let right_spec = rhs.specificity( );
+        let left_spec = self.specificity( );
+
+        if left_spec == right_spec {
+            return Some (
+                if self.is_allow( ) == rhs.is_allow( ) {
+                    Ordering::Equal
+                } else if self.is_allow( ) {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                } )
+        } else {
+            Some( left_spec.cmp( &right_spec ) )
+        }
+    }
+}
+
+impl Ord for Rule {
+    fn cmp( &self, rhs: &Self ) -> Ordering {
+        self.partial_cmp( rhs ).unwrap( )
+    }
 }
 
 impl UserAgent {
@@ -140,6 +190,11 @@ impl UserAgent {
     }
 
     fn add_agent( &mut self, name: String ) {
+
+        if name == "*" || self.names.contains( &String::from( "*" ) ) {
+            self.anomalies.push( Anomaly::RedundantWildcardUserAgent( name.clone( ) ) );
+        }
+
         if self.is_empty( ) {
             self.names.push( name );
         } else {
@@ -160,11 +215,41 @@ impl UserAgent {
     }
 }
 
+impl PartialEq for UserAgent {
+    fn eq( &self, rhs:&Self ) -> bool {
+        self.names == rhs.names
+    }
+}
+impl Eq for UserAgent {}
+
+/// Less specific User-agents are considered greater than more specific User-agents since the
+/// permissions logic ought to consider specific directives as overwriting general ones. That means
+/// User-agent sections containing wildcards are greatest and thereafter are sorted by the number of
+/// specific names which their Rule entries apply to.
+impl PartialOrd for UserAgent {
+    fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
+        let wildcard = String::from( "*" );
+        if self.names.contains( &wildcard ) {
+            Some( Ordering::Greater )
+        } else if rhs.names.contains( &wildcard ) {
+            Some( Ordering::Less )
+        }else {
+            Some( self.names.len( ).cmp( &rhs.names.len( ) ) )
+        }
+    }
+}
+
+impl Ord for UserAgent {
+    fn cmp( &self, rhs: &Self ) -> Ordering {
+        self.partial_cmp( rhs ).unwrap( )
+    }
+}
+
 impl R_State {
 
     fn empty_line( self ) -> UserAgent {
 
-        match self {
+        let mut ret = match self {
             R_State::Comment( mut u, s ) => {
                 u.add_comment( "".to_string( ), s );
                 u
@@ -172,7 +257,9 @@ impl R_State {
             R_State::Normal( u ) => {
                 u
             },
-        }
+        };
+        ret.rules.sort( );
+        ret
     }
 
     fn comment( self, line: &str ) -> Self {
@@ -388,7 +475,8 @@ impl State {
     }
 
     fn eof( self ) -> RobotsParser {
-        match self {
+
+        let mut ret = match self {
             State::Comment( mut r, s ) => {
                 r.add_comment( "[EOF]".to_string( ), s.to_string( ) );
                 r
@@ -400,10 +488,12 @@ impl State {
             State::Normal( r ) => {
                 r
             }
-        }
-
+        };
+        ret.agents.sort( );
+        ret
     }
 }
+//--SNIP--
 
 impl RobotsParser {
 
@@ -502,7 +592,8 @@ impl RobotsParser {
             if line.contains( ":" ) {
                 let ( l, r ) = line.split_at( line.find( ":" ).unwrap( ) );
                 state = state.directive_line( l.to_string( ),
-                                              r.trim_left_matches( ':' ).to_string( ) );
+                                              r.trim_left_matches( | c:char |{ c.is_whitespace( ) ||
+                                                                        c == ':' } ).to_string( ) );
             } else {
                 /***********
                  * Everything else
@@ -521,5 +612,44 @@ impl RobotsParser {
     pub fn host_url( &self ) -> BaseUrl {
         self.host.clone( )
     }
+
+    pub fn get_sitemaps( &self ) -> Vec<BaseUrl> {
+        self.sitemaps.clone( )
+    }
+
+    pub fn get_allowances( &self, user_agent: &str ) -> Vec<Rule> {
+        let agents = self.agents.iter( ).filter( | agent: &&UserAgent | //Y?
+                              { agent.names.contains( &String::from( "*" ) ) ||
+                                agent.names.contains( &user_agent.to_string( ) ) }
+        );
+
+        let mut ret = Vec::new( );
+
+        for agent in agents {
+            ret.append( &mut agent.rules.clone( ) );
+        }
+
+        ret
+    }
+
+    pub fn is_allowed( &self, url: BaseUrl, user_agent: &str ) -> bool {
+        /* NOTE: The bias is to assume we are permitted until we see a Disallow directive at which
+         * point this flips to false and only returns true if an Allow is seen explicitly permitting us
+         * This process continues all the way down the line
+         */
+        /* TODO: Timesaving is possible here by measuring the number of path segments the url contains
+         * Since the specificity of a rule is equal to the number of path segments it contains we can
+         * stop iteration short after we see a specificity greater than the path segments of the url
+         */
+        let mut bias = true;
+
+        for rule in self.get_allowances( user_agent ) {
+            if rule.applies( url ) {
+                bias = rule.is_allow( );
+            }
+        }
+        bias
+    }
+
 }
 
