@@ -7,7 +7,6 @@ extern crate base_url;
 extern crate try_from;
 
 use std::convert::*;
-use std::cmp::Ordering;
 
 use reqwest::{ Response };
 
@@ -20,6 +19,7 @@ mod parse;
 /// Anything not directly interacted with through the rest of this api is considered anomalous, and
 /// includes comments and illegal (cross host) rule lines as well as unknown or unimplemented
 /// directives.
+#[derive( Debug )]
 pub enum Anomaly {
     /// Any comment stored alongside some context, either the rest of the line the comment was found on
     /// or the line following. Context strings may be observed twice if a block comment is placed above
@@ -43,7 +43,7 @@ pub enum Anomaly {
 }
 
 /// Represents a Rule line found in a User-agent section
-#[derive( Clone, PartialEq, Eq )]
+#[derive( Debug, Clone, PartialEq, Eq )]
 pub enum Rule {
     Allow( String ),
     Disallow( String ),
@@ -54,33 +54,7 @@ pub enum Rule {
 
 }
 
-/// A User-agent section and all names, rules and anomalies associated
-pub struct UserAgent {
-    names: Vec< String >,
-    rules: Vec< Rule >,
-    anomalies: Vec< Anomaly >,
-}
-
-/// Represents a parsed robots.txt file
-pub struct RobotsParser {
-    host: BaseUrl,
-    sitemaps: Vec<BaseUrl>,
-    agents: Vec<UserAgent>,
-    anomalies: Vec< Anomaly >,
-}
-
 impl Rule {
-
-    fn new( allowance: bool, path: String ) -> Rule {
-        match allowance {
-            true => {
-                Rule::Allow( path )
-            }
-            false => {
-                Rule::Disallow( path )
-            }
-        }
-    }
 
     fn applies( &self, url: &BaseUrl ) -> bool {
         let url_specificity = Self::path_specificity( url.path( ) );
@@ -107,61 +81,13 @@ impl Rule {
         }
     }
 
-    /***********
-     * Ordering Helpers
-     ******/
-
-    fn is_allow( &self ) -> bool {
-        match self {
-            Rule::Allow( _ ) => { true }
-            _ => { false }
-        }
-    }
-
-    fn path_specificity( path: &str ) -> usize {
-        path.split( '/' ).filter( | segment |{ !segment.is_empty( ) } ).count( )
-    }
-
-    fn specificity( &self ) -> usize {
-        match self {
-            Rule::Allow( path ) | Rule::Disallow( path ) => {
-                Self::path_specificity( path )
-            }
-        }
-    }
-
 }
 
-/// Less specific rules are considered to be "greater" than more specific counterparts so that they
-/// will be considered first by the permissions logic. The more path segments a Rule contains the
-/// more specific it is. Allow rules are also considered greater than Disallow rules all other
-/// things being equal. Rules considered "least" are handled last by the permissions logic and so
-/// "overwrite" earlier rules.
-impl PartialOrd for Rule {
-
-    fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
-        let right_spec = rhs.specificity( );
-        let left_spec = self.specificity( );
-
-        if left_spec == right_spec {
-            return Some (
-                if self.is_allow( ) == rhs.is_allow( ) {
-                    Ordering::Equal
-                } else if self.is_allow( ) {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                } )
-        } else {
-            Some( left_spec.cmp( &right_spec ) )
-        }
-    }
-}
-
-impl Ord for Rule {
-    fn cmp( &self, rhs: &Self ) -> Ordering {
-        self.partial_cmp( rhs ).unwrap( )
-    }
+/// A User-agent section and all names, rules and anomalies associated
+struct UserAgent {
+    names: Vec< String >,
+    rules: Vec< Rule >,
+    anomalies: Vec< Anomaly >,
 }
 
 impl UserAgent {
@@ -204,47 +130,12 @@ impl UserAgent {
     }
 }
 
-impl PartialEq for UserAgent {
-    fn eq( &self, rhs:&Self ) -> bool {
-        self.names == rhs.names
-    }
-}
-impl Eq for UserAgent {}
-
-// I (vaguely) wonder if there is a builtin which has this effect
-fn reverse_ord( order: Ordering ) -> Ordering {
-    match order {
-        Ordering::Greater => {
-            Ordering::Less
-        }
-        Ordering::Less => {
-            Ordering::Greater
-        }
-        _ => order
-    }
-}
-
-/// Less specific User-agents are considered greater than more specific User-agents since the
-/// permissions logic ought to consider specific directives as overwriting general ones. That means
-/// User-agent sections containing wildcards are greatest and thereafter are sorted by the number of
-/// specific names which their Rule entries apply to.
-impl PartialOrd for UserAgent {
-    fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
-        let wildcard = String::from( "*" );
-        if self.names.contains( &wildcard ) {
-            Some( Ordering::Greater )
-        } else if rhs.names.contains( &wildcard ) {
-            Some( Ordering::Less )
-        }else {
-            Some( reverse_ord( self.names.len( ).cmp( &rhs.names.len( ) ) ) )
-        }
-    }
-}
-
-impl Ord for UserAgent {
-    fn cmp( &self, rhs: &Self ) -> Ordering {
-        self.partial_cmp( rhs ).unwrap( )
-    }
+/// Represents a parsed robots.txt file
+pub struct RobotsParser {
+    host: BaseUrl,
+    sitemaps: Vec<BaseUrl>,
+    agents: Vec<UserAgent>,
+    anomalies: Vec< Anomaly >,
 }
 
 impl RobotsParser {
@@ -273,6 +164,21 @@ impl RobotsParser {
         self.anomalies.push( Anomaly::UnknownFormat( line ) );
     }
 
+    fn get_allowances( &self, user_agent: &str ) -> Vec<Rule> {
+        let agents = self.agents.iter( ).filter( | agent: &&UserAgent | //Y?
+                                                   { agent.names.contains( &String::from( "*" ) ) ||
+                                                     agent.names.contains( &user_agent.to_string( ) ) }
+        );
+
+        let mut ret = Vec::new( );
+
+        for agent in agents {
+            ret.append( &mut agent.rules.clone( ) );
+        }
+
+        ret
+    }
+
     /***********
      * Creation
      ******/
@@ -283,7 +189,7 @@ impl RobotsParser {
         return ret;
     }
 
-    pub fn from_response( mut response: Response ) -> RobotsParser {
+    pub fn from_response( mut response: Response ) -> Self {
         assert!( response.status( ).is_success( ) );
 
         //NOTE: brittle
@@ -301,9 +207,6 @@ impl RobotsParser {
         Self::parse( host, text )
     }
 
-    //HACK: Best entry point into the code, understanding this is the key to adding any feature
-
-
     /***********
      * Getters
      ******/
@@ -314,21 +217,6 @@ impl RobotsParser {
 
     pub fn get_sitemaps( &self ) -> Vec<BaseUrl> {
         self.sitemaps.clone( )
-    }
-
-    pub fn get_allowances( &self, user_agent: &str ) -> Vec<Rule> {
-        let agents = self.agents.iter( ).filter( | agent: &&UserAgent | //Y?
-                              { agent.names.contains( &String::from( "*" ) ) ||
-                                agent.names.contains( &user_agent.to_string( ) ) }
-        );
-
-        let mut ret = Vec::new( );
-
-        for agent in agents {
-            ret.append( &mut agent.rules.clone( ) );
-        }
-
-        ret
     }
 
     pub fn is_allowed( &self, url: BaseUrl, user_agent: &str ) -> bool {
@@ -349,5 +237,4 @@ impl RobotsParser {
         }
         bias
     }
-
 }

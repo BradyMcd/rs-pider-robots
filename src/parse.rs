@@ -1,10 +1,125 @@
 //
+
+use std::cmp::Ordering;
+
 use base_url::BaseUrl;
 
 use Anomaly;
 use Rule;
 use UserAgent;
 use RobotsParser;
+
+impl Rule{
+
+    fn new( allowance: bool, path: String ) -> Rule {
+        match allowance {
+            true => {
+                Rule::Allow( path )
+            }
+            false => {
+                Rule::Disallow( path )
+            }
+        }
+    }
+
+    /***********
+     * Ordering Helpers
+     ******/
+    pub fn is_allow( &self ) -> bool {
+        match self {
+            Rule::Allow( _ ) => { true }
+            _ => { false }
+        }
+    }
+
+    pub fn path_specificity( path: &str ) -> usize {
+        path.split( '/' ).filter( | segment |{ !segment.is_empty( ) } ).count( )
+    }
+
+    fn specificity( &self ) -> usize {
+        match self {
+            Rule::Allow( path ) | Rule::Disallow( path ) => {
+                Self::path_specificity( path )
+            }
+        }
+    }
+}
+
+/// Less specific rules are considered to be "greater" than more specific counterparts so that they
+/// will be considered first by the permissions logic. The more path segments a Rule contains the
+/// more specific it is. Allow rules are also considered greater than Disallow rules all other
+/// things being equal. Rules considered "least" are handled last by the permissions logic and so
+/// "overwrite" earlier rules.
+impl PartialOrd for Rule {
+
+    fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
+        let right_spec = rhs.specificity( );
+        let left_spec = self.specificity( );
+
+        if left_spec == right_spec {
+            return Some (
+                if self.is_allow( ) == rhs.is_allow( ) {
+                    Ordering::Equal
+                } else if self.is_allow( ) {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                } )
+        } else {
+            Some( left_spec.cmp( &right_spec ) )
+        }
+    }
+}
+
+impl Ord for Rule {
+
+    fn cmp( &self, rhs: &Self ) -> Ordering {
+        self.partial_cmp( rhs ).unwrap( )
+    }
+}
+
+impl PartialEq for UserAgent {
+    fn eq( &self, rhs:&Self ) -> bool {
+        self.names == rhs.names
+    }
+}
+impl Eq for UserAgent {}
+
+// I (vaguely) wonder if there is a builtin which has this effect
+fn reverse_ord( order: Ordering ) -> Ordering {
+    match order {
+        Ordering::Greater => {
+            Ordering::Less
+        }
+        Ordering::Less => {
+            Ordering::Greater
+        }
+        _ => order
+    }
+}
+
+/// Less specific User-agents are considered greater than more specific User-agents since the
+/// permissions logic ought to consider specific directives as overwriting general ones. That means
+/// User-agent sections containing wildcards are greatest and thereafter are sorted by the number of
+/// specific names which their Rule entries apply to.
+impl PartialOrd for UserAgent {
+    fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
+        let wildcard = String::from( "*" );
+        if self.names.contains( &wildcard ) {
+            Some( Ordering::Greater )
+        } else if rhs.names.contains( &wildcard ) {
+            Some( Ordering::Less )
+        }else {
+            Some( reverse_ord( self.names.len( ).cmp( &rhs.names.len( ) ) ) )
+        }
+    }
+}
+
+impl Ord for UserAgent {
+    fn cmp( &self, rhs: &Self ) -> Ordering {
+        self.partial_cmp( rhs ).unwrap( )
+    }
+}
 
 enum R_State { //Recursed state; useragent sections don't recurse, they add
     Comment( UserAgent, String ),
@@ -297,8 +412,8 @@ impl State {
 }
 
 impl RobotsParser {
-
-    pub fn parse< S: Into<String> >( host: BaseUrl, text: S ) -> RobotsParser {
+    //HACK: This is the function to understand if you want to add a feature
+    pub fn parse< S: Into<String> >( host: BaseUrl, text: S ) -> Self {
         let text = text.into( ); //Not a one-liner to appease lifetimes
         let lines = text.lines( );
         let ret = RobotsParser{
