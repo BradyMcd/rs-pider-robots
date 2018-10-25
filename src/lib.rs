@@ -222,6 +222,19 @@ impl PartialEq for UserAgent {
 }
 impl Eq for UserAgent {}
 
+// I (vaguely) wonder if there is a builtin which has this effect
+fn reverse_ord( order: Ordering ) -> Ordering {
+    match order {
+        Ordering::Greater => {
+            Ordering::Less
+        }
+        Ordering::Less => {
+            Ordering::Greater
+        }
+        _ => order
+    }
+}
+
 /// Less specific User-agents are considered greater than more specific User-agents since the
 /// permissions logic ought to consider specific directives as overwriting general ones. That means
 /// User-agent sections containing wildcards are greatest and thereafter are sorted by the number of
@@ -234,7 +247,7 @@ impl PartialOrd for UserAgent {
         } else if rhs.names.contains( &wildcard ) {
             Some( Ordering::Less )
         }else {
-            Some( self.names.len( ).cmp( &rhs.names.len( ) ) )
+            Some( reverse_ord( self.names.len( ).cmp( &rhs.names.len( ) ) ) )
         }
     }
 }
