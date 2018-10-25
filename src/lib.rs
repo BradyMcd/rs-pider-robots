@@ -121,6 +121,31 @@ impl Rule {
         }
     }
 
+    fn applies( &self, url: &BaseUrl ) -> bool {
+        let url_specificity = Self::path_specificity( url.path( ) );
+        let self_specificity;
+        let url_path = url.path( ).split( '/' );
+        let self_path = match self {
+            Rule::Allow( path ) | Rule::Disallow( path ) => {
+                if path == "*" { return true; }
+                self_specificity = Self::path_specificity( path );
+                path.split( '/' )
+            }
+        };
+
+        if url_specificity < self_specificity {
+            false
+        } else {
+            for segments in url_path.zip( self_path ) {
+                let ( url_seg, self_seg ) = segments;
+                if url_seg != self_seg && !url_seg.is_empty( ) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+
     /***********
      * Ordering Helpers
      ******/
@@ -132,22 +157,25 @@ impl Rule {
         }
     }
 
+    fn path_specificity( path: &str ) -> usize {
+        path.split( '/' ).filter( | segment |{ !segment.is_empty( ) } ).count( )
+    }
+
     fn specificity( &self ) -> usize {
         match self {
             Rule::Allow( path ) | Rule::Disallow( path ) => {
-                path.split( '/' ).filter( | segment |{ !segment.is_empty( ) } ).count( )
+                Self::path_specificity( path )
             }
         }
     }
 
 }
 
-/// Less specific rules are considered to be greater than more specific counterparts so that they
+/// Less specific rules are considered to be "greater" than more specific counterparts so that they
 /// will be considered first by the permissions logic. The more path segments a Rule contains the
 /// more specific it is. Allow rules are also considered greater than Disallow rules all other
-/// things being equal, again, this is so that equally specific Disallow rules are handled last and
-/// "overwrite" their Allow counterparts since that behavior is in the spirit of what a robots.txt
-/// is for, to dictate which directories are off limits to a web robot.
+/// things being equal. Rules considered "least" are handled last by the permissions logic and so
+/// "overwrite" earlier rules.
 impl PartialOrd for Rule {
 
     fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
@@ -647,8 +675,8 @@ impl RobotsParser {
 
     pub fn is_allowed( &self, url: BaseUrl, user_agent: &str ) -> bool {
         /* NOTE: The bias is to assume we are permitted until we see a Disallow directive at which
-         * point this flips to false and only returns true if an Allow is seen explicitly permitting us
-         * This process continues all the way down the line
+         * point this flips to false and only flips to true again if a more specific Allow directive is
+         * found. This back and forth continues until we run out of applicable rules.
          */
         /* TODO: Timesaving is possible here by measuring the number of path segments the url contains
          * Since the specificity of a rule is equal to the number of path segments it contains we can
@@ -657,7 +685,7 @@ impl RobotsParser {
         let mut bias = true;
 
         for rule in self.get_allowances( user_agent ) {
-            if rule.applies( url ) {
+            if rule.applies( &url ) {
                 bias = rule.is_allow( );
             }
         }
