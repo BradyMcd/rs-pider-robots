@@ -11,7 +11,10 @@ use RobotsParser;
 
 impl Rule{
 
-    fn new( allowance: bool, path: String ) -> Rule {
+    fn new( allowance: bool, mut path: String ) -> Rule {
+        if path.is_empty( ) {
+            path.push_str( "/" );
+        }
         match allowance {
             true => {
                 Rule::Allow( path )
@@ -45,11 +48,8 @@ impl Rule{
     }
 }
 
-/// Less specific rules are considered to be "greater" than more specific counterparts so that they
-/// will be considered first by the permissions logic. The more path segments a Rule contains the
-/// more specific it is. Allow rules are also considered greater than Disallow rules all other
-/// things being equal. Rules considered "least" are handled last by the permissions logic and so
-/// "overwrite" earlier rules.
+/// Rules are ordered first by specificity then by their allowance. That means that the most specific
+/// disallow rule is found first and the least specific allow rule is considered last.
 impl PartialOrd for Rule {
 
     fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
@@ -61,9 +61,9 @@ impl PartialOrd for Rule {
                 if self.is_allow( ) == rhs.is_allow( ) {
                     Ordering::Equal
                 } else if self.is_allow( ) {
-                    Ordering::Greater
-                } else {
                     Ordering::Less
+                } else {
+                    Ordering::Greater
                 } )
         } else {
             Some( left_spec.cmp( &right_spec ) )
@@ -85,32 +85,22 @@ impl PartialEq for UserAgent {
 }
 impl Eq for UserAgent {}
 
-// I (vaguely) wonder if there is a builtin which has this effect
-fn reverse_ord( order: Ordering ) -> Ordering {
-    match order {
-        Ordering::Greater => {
-            Ordering::Less
-        }
-        Ordering::Less => {
-            Ordering::Greater
-        }
-        _ => order
-    }
-}
-
-/// Less specific User-agents are considered greater than more specific User-agents since the
-/// permissions logic ought to consider specific directives as overwriting general ones. That means
-/// User-agent sections containing wildcards are greatest and thereafter are sorted by the number of
-/// specific names which their Rule entries apply to.
+/// UserAgents are ordered by specificity. That means that names containing wildcards are considered
+/// last when determining permissions while UserAgents with the fewest full names are considered first.
 impl PartialOrd for UserAgent {
+    // TODO: possibly give this another look. Maybe I should care about name length more than number of
+    // names
     fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
         let wildcard = String::from( "*" );
-        if self.names.contains( &wildcard ) {
-            Some( Ordering::Greater )
-        } else if rhs.names.contains( &wildcard ) {
+
+        if self.names == rhs.names{
+            Some( Ordering::Equal )
+        }else if self.names.contains( &wildcard ) {
             Some( Ordering::Less )
+        } else if rhs.names.contains( &wildcard ) {
+            Some( Ordering::Greater )
         }else {
-            Some( reverse_ord( self.names.len( ).cmp( &rhs.names.len( ) ) ) )
+            Some( self.names.len( ).cmp( &rhs.names.len( ) ).reverse( ) )
         }
     }
 }
@@ -121,6 +111,7 @@ impl Ord for UserAgent {
     }
 }
 
+#[allow(non_camel_case_types)]
 enum R_State { //Recursed state; useragent sections don't recurse, they add
     Comment( UserAgent, String ),
     Normal( UserAgent ),
@@ -132,6 +123,7 @@ enum State {
     Normal( RobotsParser ), //Any lines at the root level (those without a useragent association)
 }
 
+#[allow(non_camel_case_types)]
 enum DirectiveResult<'a> {
     Ok_UserAgent( String ),
     Ok_Rule( Rule ),
@@ -221,7 +213,7 @@ impl R_State {
             }
         }
 
-        //HACK: Space saving is possible by moving the Casing anomaly check
+        //NOTE: Space saving is possible by moving the Casing anomaly check
         if directive.starts_with( | c: char |( c.is_lowercase( ) ) ) {
             user_agent.add_anomaly( Anomaly::Casing( directive.to_string( ), argument.to_string( ) ) );
             //NOTE: We don't ignore the casing anomaly, our goal is to be as permissive as possible
@@ -374,6 +366,7 @@ impl State {
     }
 
     fn anomaly( self, line: &str ) -> Self {
+
         match self {
             State::Comment( mut r, s ) => {
                 r.add_comment( line.to_string( ), s.to_string( ) );
@@ -467,4 +460,87 @@ impl RobotsParser {
 
         state.eof( )
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /***********
+     * Rule
+     ******/
+    #[test]
+    fn rule_creation( ) {
+        let rule = Rule::new( true, String::from( "/foo/" ) );
+
+        assert_eq!( Rule::Allow( String::from( "/foo/" ) ), rule );
+    }
+
+    #[test]
+    fn rule_specificity( ) {
+        let mut path = String::from( "" );
+        let rule_a  = Rule::new( true, path.clone( ) );
+
+        assert_eq!( rule_a.specificity( ), 0 );
+ 
+        path.push_str( "/foo" );
+        let rule_b = Rule::new( true, path.clone( ) );
+        path.push_str( "/" );
+        let rule_c = Rule::new( false, path.clone( ) );
+
+        assert_eq!( rule_b.specificity( ), rule_c.specificity( ) );
+    }
+
+    #[test]
+    fn rule_ordering( ) {
+        let mut path = String::from( "/" );
+        let rule_a = Rule::new( false, path.clone( ) );
+        let rule_b = Rule::new( true, path.clone( ) );
+
+        path.push_str( "foo" );
+
+        let rule_c = Rule::new( false, path.clone( ) );
+
+        path.push_str( "/bar" );
+
+        let rule_d = Rule::new( true, path.clone( ) );
+
+        let mut rule_vec_a = vec![ rule_b.clone( ), rule_a.clone( ),
+                                   rule_d.clone( ), rule_c.clone( ) ];
+
+        let mut rule_vec_b = vec![ rule_a.clone( ), rule_c.clone( ),
+                                   rule_b.clone( ), rule_d.clone( )];
+
+        rule_vec_a.sort( );
+        rule_vec_b.sort( );
+
+        assert_eq!( rule_vec_a, rule_vec_b );
+    }
+
+    /***********
+     * UserAgent
+     ******/
+    #[test]
+    fn useragent_ordering( ) {
+        let ua_1 = UserAgent::new( String::from( "*" ) );
+        let ua_2 = UserAgent::new( String::from( "foogle" ) );
+        let ua_3 = UserAgent::new( String::from( "foogle-news" ) );
+        let mut ua_4 = UserAgent::new( String::from( "*" ) );
+
+        ua_4.add_anomaly( Anomaly::UnknownFormat( String::from( "Test" ) ) );
+
+        assert_eq!( ua_1, ua_4 );
+
+        let mut ua_vec_a = vec![ ua_4.clone( ), ua_2.clone( ), ua_3.clone( ), ua_1.clone( ) ];
+        let mut ua_vec_b = vec![ ua_1.clone( ), ua_3.clone( ), ua_4.clone( ), ua_2.clone( ) ];
+
+        ua_vec_a.sort( );
+        ua_vec_b.sort( );
+
+        assert_eq!( ua_vec_a, ua_vec_b );
+
+
+    }
+
+
 }

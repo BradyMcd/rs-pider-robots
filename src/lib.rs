@@ -1,7 +1,6 @@
 //
-// TODO: Getters, Tests, Documentation/Code Rearrangement, HACK comments
-// TODO: RE: Code Rearrangement: Isolate the parsing logic from the main structure
-// TODO: Sort rule entries by order of specificity, that means User-agent sections go wildcard first as do rules
+// TODO: Getters, Tests, Documentation, HACK comments
+
 extern crate reqwest;
 extern crate base_url;
 extern crate try_from;
@@ -19,7 +18,7 @@ mod parse;
 /// Anything not directly interacted with through the rest of this api is considered anomalous, and
 /// includes comments and illegal (cross host) rule lines as well as unknown or unimplemented
 /// directives.
-#[derive( Debug )]
+#[derive( Debug, Clone )]
 pub enum Anomaly {
     /// Any comment stored alongside some context, either the rest of the line the comment was found on
     /// or the line following. Context strings may be observed twice if a block comment is placed above
@@ -80,10 +79,10 @@ impl Rule {
             true
         }
     }
-
 }
 
 /// A User-agent section and all names, rules and anomalies associated
+#[derive( Debug, Clone )]
 struct UserAgent {
     names: Vec< String >,
     rules: Vec< Rule >,
@@ -92,7 +91,10 @@ struct UserAgent {
 
 impl UserAgent {
 
-    fn new( agent: String ) -> Self {
+    fn new( mut agent: String ) -> Self {
+        if agent.is_empty( ) {
+            agent.push_str( "*" );
+        }
         UserAgent{
             names: vec!( agent.to_string( ) ),
             rules: Vec::new( ),
@@ -127,6 +129,13 @@ impl UserAgent {
 
     fn add_anomaly( &mut self, anomaly: Anomaly ) {
         self.anomalies.push( anomaly );
+    }
+
+    fn applies( &self, user_agent: &str ) -> bool {
+
+        self.names.iter( ).any( | name |{
+            user_agent.starts_with( name ) || name == "*"
+        } )
     }
 }
 
@@ -165,9 +174,8 @@ impl RobotsParser {
     }
 
     fn get_allowances( &self, user_agent: &str ) -> Vec<Rule> {
-        let agents = self.agents.iter( ).filter( | agent: &&UserAgent | //Y?
-                                                   { agent.names.contains( &String::from( "*" ) ) ||
-                                                     agent.names.contains( &user_agent.to_string( ) ) }
+        let agents = self.agents.iter( ).filter(
+            | agent: &&UserAgent | { agent.applies( user_agent ) }
         );
 
         let mut ret = Vec::new( );
@@ -219,22 +227,22 @@ impl RobotsParser {
         self.sitemaps.clone( )
     }
 
+    /// Given a url and a user agent string determines if this robots.txt disallows browsing to that
+    /// url. This is generally understood as more of a suggestion than a rule.
+    //HACK: Can we combine the search through the UserAgents and the search for allowances in a way
+    // which is clean?
     pub fn is_allowed( &self, url: BaseUrl, user_agent: &str ) -> bool {
-        /* NOTE: The bias is to assume we are permitted until we see a Disallow directive at which
-         * point this flips to false and only flips to true again if a more specific Allow directive is
-         * found. This back and forth continues until we run out of applicable rules.
-         */
-        /* TODO: Timesaving is possible here by measuring the number of path segments the url contains
-         * Since the specificity of a rule is equal to the number of path segments it contains we can
-         * stop iteration short after we see a specificity greater than the path segments of the url
-         */
-        let mut bias = true;
 
         for rule in self.get_allowances( user_agent ) {
             if rule.applies( &url ) {
-                bias = rule.is_allow( );
+                return rule.is_allow( );
             }
         }
-        bias
+        false
     }
+}
+
+#[cfg(test)]
+mod tests {
+    
 }
