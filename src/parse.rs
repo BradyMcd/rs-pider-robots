@@ -1,6 +1,7 @@
 //
 
 use std::cmp::Ordering;
+use std::usize::MAX;
 
 use base_url::BaseUrl;
 
@@ -61,9 +62,9 @@ impl PartialOrd for Rule {
                 if self.is_allow( ) == rhs.is_allow( ) {
                     Ordering::Equal
                 } else if self.is_allow( ) {
-                    Ordering::Less
-                } else {
                     Ordering::Greater
+                } else {
+                    Ordering::Less
                 } )
         } else {
             Some( left_spec.cmp( &right_spec ) )
@@ -78,6 +79,14 @@ impl Ord for Rule {
     }
 }
 
+impl UserAgent {
+    fn specificity( &self ) -> usize {
+        self.names.iter().fold( MAX, | min: usize, name |{
+            if min < name.len() { min } else { name.len( ) }
+        } )
+    }
+}
+
 impl PartialEq for UserAgent {
     fn eq( &self, rhs:&Self ) -> bool {
         self.names == rhs.names
@@ -86,7 +95,7 @@ impl PartialEq for UserAgent {
 impl Eq for UserAgent {}
 
 /// UserAgents are ordered by specificity. That means that names containing wildcards are considered
-/// last when determining permissions while UserAgents with the fewest full names are considered first.
+/// last when determining permissions while UserAgents with the longest full name is considered first.
 impl PartialOrd for UserAgent {
     // TODO: possibly give this another look. Maybe I should care about name length more than number of
     // names
@@ -96,11 +105,11 @@ impl PartialOrd for UserAgent {
         if self.names == rhs.names{
             Some( Ordering::Equal )
         }else if self.names.contains( &wildcard ) {
-            Some( Ordering::Less )
-        } else if rhs.names.contains( &wildcard ) {
             Some( Ordering::Greater )
+        } else if rhs.names.contains( &wildcard ) {
+            Some( Ordering::Less )
         }else {
-            Some( self.names.len( ).cmp( &rhs.names.len( ) ).reverse( ) )
+            Some( self.specificity( ).cmp( &rhs.specificity( ) ).reverse( ) )
         }
     }
 }
@@ -462,6 +471,10 @@ impl RobotsParser {
     }
 }
 
+
+/***********
+ * Unit Tests
+ ******/
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,22 +538,9 @@ mod tests {
         let ua_1 = UserAgent::new( String::from( "*" ) );
         let ua_2 = UserAgent::new( String::from( "foogle" ) );
         let ua_3 = UserAgent::new( String::from( "foogle-news" ) );
-        let mut ua_4 = UserAgent::new( String::from( "*" ) );
 
-        ua_4.add_anomaly( Anomaly::UnknownFormat( String::from( "Test" ) ) );
-
-        assert_eq!( ua_1, ua_4 );
-
-        let mut ua_vec_a = vec![ ua_4.clone( ), ua_2.clone( ), ua_3.clone( ), ua_1.clone( ) ];
-        let mut ua_vec_b = vec![ ua_1.clone( ), ua_3.clone( ), ua_4.clone( ), ua_2.clone( ) ];
-
-        ua_vec_a.sort( );
-        ua_vec_b.sort( );
-
-        assert_eq!( ua_vec_a, ua_vec_b );
-
+        assert!( ua_1 > ua_2 );
+        assert!( ua_2 > ua_3 );
 
     }
-
-
 }

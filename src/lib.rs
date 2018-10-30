@@ -7,6 +7,9 @@ extern crate try_from;
 
 use std::convert::*;
 
+use std::fmt::{ Formatter, Display };
+use std::fmt::Result as DisplayResult;
+
 use reqwest::{ Response };
 
 use try_from::TryFrom;
@@ -25,7 +28,7 @@ pub enum Anomaly {
     /// a line with a directive and comment.
     Comment( String /*The comment*/, String /*The context*/ ),
     /// Rules whose names are not in the normal casing format, ie. "foo" rather than "Foo"
-    Casing( String, String ), // mostly here to guage if this type of error is common
+    Casing( String, String ),
     /// A Rule located outside of a User-agent section
     OrphanRule( Rule ),
     /// A User-agent line nested in another User-agent section which already contains one or more Rules
@@ -39,6 +42,41 @@ pub enum Anomaly {
     /// Any line which isn't in the standard format for a robots.txt file, ie. a line without a ':'
     /// separator which is not a comment
     UnknownFormat( String ),
+}
+
+impl Display for Anomaly {
+    fn fmt( &self, formatter: &mut Formatter ) -> DisplayResult {
+        match self {
+            Anomaly::Comment( cmnt, ctxt ) => {
+                if ctxt.contains( "\n" ) || ctxt == "[EOF]" {
+                    write!( formatter, "{}{}", cmnt, ctxt )
+                } else {
+                    write!( formatter, "{}{}", ctxt, cmnt )
+                }
+            }
+            Anomaly::Casing( rule, path ) => {
+                write!( formatter, "Nonstandard casing: {}: {}", rule, path )
+            }
+            Anomaly::OrphanRule( rule ) => {
+                write!( formatter, "Orphaned Rule: {}", rule )
+            }
+            Anomaly::RecursedUserAgent( name ) => {
+                write!( formatter, "Recursed User-agent: {}", name )
+            }
+            Anomaly::RedundantWildcardUserAgent( name ) => {
+                write!( formatter, "Specific User-agent: {} found after a wildcard", name )
+            }
+            Anomaly::MissSectionedDirective( drctv, arg ) => {
+                write!( formatter, "{}: {}", drctv, arg )
+            }
+            Anomaly::UnknownDirective( drctv, arg ) => {
+                write!( formatter, "Unimplemented directive: {}: {}", drctv, arg )
+            }
+            Anomaly::UnknownFormat( line ) => {
+                write!( formatter, "Unknown line: {}", line )
+            }
+        }
+    }
 }
 
 /// Represents a Rule line found in a User-agent section
@@ -240,9 +278,23 @@ impl RobotsParser {
         }
         false
     }
+
+    /***********
+     * Display
+     ******/
+
 }
 
-#[cfg(test)]
-mod tests {
-    
+/*
+impl Display for RobotsParser {
+    fn fmt( &self, fmt: &mut Formatter ) -> DisplayResult {
+        for anomaly in self.anomalies {
+            match anomaly {
+                Comment( cmnt, ctxt ) => {
+                    
+                }
+            }
+        }
+    }
 }
+*/
