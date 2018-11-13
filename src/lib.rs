@@ -10,6 +10,10 @@ use std::convert::*;
 use std::fmt::{ Formatter, Display };
 use std::fmt::Result as DisplayResult;
 
+//sleepsort
+use std::thread::{ spawn, sleep };
+
+
 use reqwest::{ Response };
 
 use try_from::TryFrom;
@@ -39,11 +43,13 @@ pub enum Anomaly {
     MissSectionedDirective( String, String ),
     /// Any directive which is unimplemented or otherwise unknown
     UnknownDirective( String, String ),
+    /// Any argument which is in a bad format ie. a non-url sitemap or non-integer delay
+    BadArgument( String, String ),
     /// Any line which isn't in the standard format for a robots.txt file, ie. a line without a ':'
     /// separator which is not a comment
     UnknownFormat( String ),
 }
-
+//here
 impl Display for Anomaly {
     fn fmt( &self, formatter: &mut Formatter ) -> DisplayResult {
         match self {
@@ -72,6 +78,9 @@ impl Display for Anomaly {
             Anomaly::UnknownDirective( drctv, arg ) => {
                 write!( formatter, "Unimplemented directive: {}: {}", drctv, arg )
             }
+            Anomaly::BadArgument( drctv, arg ) => {
+                write!( formatter, "{} requires a different format for its argument {}", drctv, arg )
+            }
             Anomaly::UnknownFormat( line ) => {
                 write!( formatter, "Unknown line: {}", line )
             }
@@ -99,7 +108,7 @@ impl Rule {
         let url_path = url.path( ).split( '/' );
         let self_path = match self {
             Rule::Allow( path ) | Rule::Disallow( path ) => {
-                if path == "*" { return true; }
+                if path == "*" || path == "/" || path.is_empty( ) { return true; }
                 self_specificity = Self::path_specificity( path );
                 path.split( '/' )
             }
@@ -115,6 +124,15 @@ impl Rule {
                 }
             }
             true
+        }
+    }
+}
+
+impl Display for Rule {
+    fn fmt( &self, formatter: &mut Formatter ) -> DisplayResult {
+        match self {
+            Rule::Allow( path ) => { write!( formatter, "Allow: {}", path ) }
+            Rule::Disallow( path ) => { write!( formatter, "Disallow: {}", path ) }
         }
     }
 }
@@ -176,7 +194,6 @@ impl UserAgent {
         } )
     }
 }
-
 /// Represents a parsed robots.txt file
 pub struct RobotsParser {
     host: BaseUrl,
@@ -285,16 +302,3 @@ impl RobotsParser {
 
 }
 
-/*
-impl Display for RobotsParser {
-    fn fmt( &self, fmt: &mut Formatter ) -> DisplayResult {
-        for anomaly in self.anomalies {
-            match anomaly {
-                Comment( cmnt, ctxt ) => {
-                    
-                }
-            }
-        }
-    }
-}
-*/

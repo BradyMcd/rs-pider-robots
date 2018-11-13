@@ -1,9 +1,11 @@
 //
+// TODO: Line numbering, HACK commments
 
 use std::cmp::Ordering;
 use std::usize::MAX;
 
 use base_url::BaseUrl;
+use try_from::TryFrom;
 
 use Anomaly;
 use Rule;
@@ -30,9 +32,20 @@ impl Rule{
      * Ordering Helpers
      ******/
     pub fn is_allow( &self ) -> bool {
+        //NOTE: if the path is empty that classically means that no paths are allowed/disallowed so we
+        // flip the allowance returned, if no paths are disallowed then everything is allowed
+        let mul = match self {
+            Rule::Allow( path ) | Rule::Disallow( path ) => {
+                if path.is_empty( ) {
+                    false
+                } else {
+                    true
+                }
+            }
+        };
         match self {
-            Rule::Allow( _ ) => { true }
-            _ => { false }
+            Rule::Allow( _ ) => { mul == true }
+            _ => { mul == false }
         }
     }
 
@@ -133,16 +146,17 @@ enum State {
 }
 
 #[allow(non_camel_case_types)]
-enum DirectiveResult<'a> {
+enum DirectiveResult {
     Ok_UserAgent( String ),
     Ok_Rule( Rule ),
-    Ok_Sitemap( &'a str ),
+    Ok_Sitemap( BaseUrl ),
     //Ok_RequestRate( u32 ),
     //Ok_CrawlDelay( u32 ),
+    Err_BadArg(),
     Unknown(),
 }
 
-fn parse_directive<'a>( directive: &str, argument: &'a str ) -> DirectiveResult< 'a > {
+fn parse_directive( directive: &str, argument: &str ) -> DirectiveResult {
     match directive {
         "User-agent" => {
             DirectiveResult::Ok_UserAgent( argument.to_string( ) )
@@ -154,14 +168,18 @@ fn parse_directive<'a>( directive: &str, argument: &'a str ) -> DirectiveResult<
             DirectiveResult::Ok_Rule( Rule::new( true, argument.to_string( ) ) )
         }
         "Sitemap" => {
-            DirectiveResult::Ok_Sitemap( argument )
+            let url = BaseUrl::try_from( argument );
+            if url.is_ok( ) {
+                DirectiveResult::Ok_Sitemap( url.unwrap( ) )
+            } else {
+                DirectiveResult::Err_BadArg()
+            }
         }
         _ => {
             DirectiveResult::Unknown()
         }
     }
 }
-
 
 impl R_State {
 
@@ -243,6 +261,11 @@ impl R_State {
                     Anomaly::UnknownDirective( directive.to_string( ),
                                                argument.to_string( ) )
                 );
+                R_State::Normal( user_agent )
+            }
+            DirectiveResult::Err_BadArg() => {
+                user_agent.add_anomaly( Anomaly::BadArgument( directive.to_string( ),
+                                                              argument.to_string( ) ) );
                 R_State::Normal( user_agent )
             }
             _ => {
@@ -357,14 +380,17 @@ impl State {
                 State::Normal( robots )
             }
             DirectiveResult::Ok_Sitemap( s ) => {
-                let mut sitemap_url = robots.host_url( );
-                sitemap_url.set_path( s );
-                robots.add_sitemap( sitemap_url );
+                robots.add_sitemap( s );
+                State::Normal( robots )
+            }
+            DirectiveResult::Err_BadArg( ) => {
+                robots.add_anomaly( Anomaly::BadArgument( directive.to_string( ),
+                                                          argument.to_string( ) ) );
                 State::Normal( robots )
             }
 //            DirectiveResult::Ok_RequestRate( r ) => {}
 //            DirectiveResult::Ok_CrawlDelay( d ) = > {}
-            DirectiveResult::Unknown() => {
+            DirectiveResult::Unknown( ) => {
                 robots.add_anomaly(
                     Anomaly::UnknownDirective( directive.to_string( ),
                                                argument.to_string( ) )
@@ -427,7 +453,7 @@ impl RobotsParser {
 
         let mut state = State::Normal( ret );
 
-        for _line in lines {
+        for ( ln, _line ) in lines.enumerate( ) {
             //NOTE: in both of the split_at directives the split character goes into r
             let mut line = _line.trim( ); //clear any whitespace
 
@@ -495,7 +521,7 @@ mod tests {
         let rule_a  = Rule::new( true, path.clone( ) );
 
         assert_eq!( rule_a.specificity( ), 0 );
- 
+
         path.push_str( "/foo" );
         let rule_b = Rule::new( true, path.clone( ) );
         path.push_str( "/" );
