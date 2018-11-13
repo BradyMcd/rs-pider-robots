@@ -10,9 +10,7 @@ use std::convert::*;
 use std::fmt::{ Formatter, Display };
 use std::fmt::Result as DisplayResult;
 
-//sleepsort
 use std::thread::{ spawn, sleep };
-
 
 use reqwest::{ Response };
 

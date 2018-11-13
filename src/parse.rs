@@ -240,6 +240,8 @@ impl R_State {
             }
         }
 
+        //NOTE: This isn't going to capture all casing anomalies on the web, "User-Agent" for example
+        // can be found on many very popular sites, even in the same file where "User-agent" is used
         //NOTE: Space saving is possible by moving the Casing anomaly check
         if directive.starts_with( | c: char |( c.is_lowercase( ) ) ) {
             user_agent.add_anomaly( Anomaly::Casing( directive.to_string( ), argument.to_string( ) ) );
