@@ -268,6 +268,13 @@ impl RobotsParser {
         Self::parse( host, text )
     }
 
+    pub fn from_stringable < S: Into< String > > ( stringable: S, host: BaseUrl ) -> Self {
+
+        let text = stringable.into( );
+
+        Self::parse( host, text )
+    }
+
     /***********
      * Getters
      ******/
@@ -284,14 +291,16 @@ impl RobotsParser {
     /// url. This is generally understood as more of a suggestion than a rule.
     //HACK: Can we combine the search through the UserAgents and the search for allowances in a way
     // which is clean?
-    pub fn is_allowed( &self, url: BaseUrl, user_agent: &str ) -> bool {
+    pub fn is_allowed( &self, url: &BaseUrl, user_agent: &str ) -> bool {
+
+        assert!( url.host( ) == self.host_url( ).host( ) );
 
         for rule in self.get_allowances( user_agent ) {
             if rule.applies( &url ) {
                 return rule.is_allow( );
             }
         }
-        false
+        true
     }
 
 }

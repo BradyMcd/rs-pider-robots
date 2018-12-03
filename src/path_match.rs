@@ -10,7 +10,7 @@ pub fn match_with_asterisk( haystack: &str, needle: &str ) -> bool {
     }
 
     let mut loc = 0;
-    let mut segments = if needle.starts_with( '*' ) {
+    let segments = if needle.starts_with( '*' ) {
         let mut _segments = needle.split( '*' );
         let first_seg = _segments.next( ).unwrap( );
         if !haystack.starts_with( first_seg ) { return false; }
