@@ -455,7 +455,7 @@ impl RobotsParser {
 
         let mut state = State::Normal( ret );
 
-        for ( ln, _line ) in lines.enumerate( ) {
+        for _line in lines {
             //NOTE: in both of the split_at directives the split character goes into r
             let mut line = _line.trim( ); //clear any whitespace
 
