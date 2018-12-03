@@ -17,6 +17,8 @@ use reqwest::{ Response };
 use try_from::TryFrom;
 use base_url::BaseUrl;
 
+mod path_match;
+use path_match::*;
 mod parse;
 
 /// A set of observed anomalies in the robots.txt file
@@ -47,7 +49,7 @@ pub enum Anomaly {
     /// separator which is not a comment
     UnknownFormat( String ),
 }
-//here
+
 impl Display for Anomaly {
     fn fmt( &self, formatter: &mut Formatter ) -> DisplayResult {
         match self {
@@ -106,7 +108,7 @@ impl Rule {
         let url_path = url.path( ).split( '/' );
         let self_path = match self {
             Rule::Allow( path ) | Rule::Disallow( path ) => {
-                if path == "*" || path == "/" || path.is_empty( ) { return true; }
+                if path == "/" || path.is_empty( ) { return true; }
                 self_specificity = Self::path_specificity( path );
                 path.split( '/' )
             }
@@ -117,7 +119,7 @@ impl Rule {
         } else {
             for segments in url_path.zip( self_path ) {
                 let ( url_seg, self_seg ) = segments;
-                if url_seg != self_seg && !url_seg.is_empty( ) {
+                if !match_with_asterisk( url_seg, self_seg ) {
                     return false;
                 }
             }
