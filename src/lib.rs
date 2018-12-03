@@ -246,6 +246,7 @@ impl RobotsParser {
 
     pub fn guess_robots_url( &self ) -> BaseUrl {
         let mut ret = self.host.clone( );
+        //strip the url
         ret.set_path( "/robots.txt" );
         return ret;
     }
@@ -287,6 +288,17 @@ impl RobotsParser {
         self.sitemaps.clone( )
     }
 
+    pub fn get_anomalies( &self ) -> Vec<Anomaly> {
+
+        let mut ret = self.anomalies.clone( );
+
+        for agent in self.agents.iter( ) {
+            ret.append( &mut agent.anomalies.clone( ) );
+        }
+
+        ret
+    }
+
     /// Given a url and a user agent string determines if this robots.txt disallows browsing to that
     /// url. This is generally understood as more of a suggestion than a rule.
     //HACK: Can we combine the search through the UserAgents and the search for allowances in a way
@@ -304,4 +316,3 @@ impl RobotsParser {
     }
 
 }
-
