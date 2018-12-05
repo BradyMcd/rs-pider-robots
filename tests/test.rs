@@ -38,8 +38,8 @@ fn test_overlapping_robots( ) {
     assert!( overlapping.is_allowed( &url2, "Bot" ) );
     assert!( overlapping.is_allowed( &url2, "Bot-1" ) );
     assert!( !overlapping.is_allowed( &url2, "aBot" ) );
-    assert!( !overlapping.is_allowed( &url3, "Bot" ) );
-    assert!( overlapping.is_allowed( &url3, "Bot-1" ) );
+    assert!( overlapping.is_allowed( &url3, "Bot" ) );
+    assert!( !overlapping.is_allowed( &url3, "Bot-1" ) );
 }
 
 #[test]
