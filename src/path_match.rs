@@ -71,12 +71,15 @@ mod tests{
     fn leading_asterisk( ) {
         assert!( match_with_asterisk( "Target", "*Target" ) );
         assert!( match_with_asterisk( "Some things we don't care about and the Target", "*Target" ) );
+        assert!( match_with_asterisk( "The Target needs to be last to match", "*Target" ) );
         assert!( !match_with_asterisk( "Really just things we don't care about", "*Target" ) );
     }
 
     #[test]
     fn trailing_asterisk( ) {
+        assert!( match_with_asterisk( "Target", "Target*" ) );
         assert!( match_with_asterisk( "Target and some things we don't care about", "Target*" ) );
+        assert!( !match_with_asterisk( "We care about Target, but this won't match", "Target*" ) );
         assert!( !match_with_asterisk( "No instance of the string we want", "Target*" ) );
     }
 
@@ -87,4 +90,11 @@ mod tests{
         assert!( !match_with_asterisk( "more complex by a bit and doesn't work",
                                        "*a bit*more complex*work*" ) );
     }
+
+    #[test]
+    fn redundant_asterisks( ) {
+        assert!( match_with_asterisk( "This should match", "**sh**ma*" ) );
+        assert!( match_with_asterisk( "Doesn't match", "**at**oe*" ) );
+    }
+
 }
