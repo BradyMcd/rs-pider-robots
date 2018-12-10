@@ -12,8 +12,8 @@ use std::fmt::Result as DisplayResult;
 
 use reqwest::{ Response };
 
-use try_from::TryFrom;
 use base_url::BaseUrl;
+use base_url::TryFrom;
 
 mod path_match;
 use path_match::*;

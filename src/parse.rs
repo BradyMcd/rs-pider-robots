@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::usize::MAX;
 
 use base_url::BaseUrl;
-use try_from::TryFrom;
+use base_url::TryFrom;
 
 use Anomaly;
 use Rule;
