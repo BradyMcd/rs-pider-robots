@@ -3,7 +3,6 @@
 
 extern crate reqwest;
 extern crate base_url;
-extern crate try_from;
 
 use std::convert::*;
 

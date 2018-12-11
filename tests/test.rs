@@ -1,12 +1,11 @@
 
 extern crate rs_pider_robots;
 extern crate base_url;
-extern crate try_from;
 
 use rs_pider_robots::*;
 
 use base_url::BaseUrl;
-use try_from::TryFrom;
+use base_url::TryFrom;
 
 mod data;
 use data::{ ROBOTS_SIMPLE, ROBOTS_OVERLAPPING, ROBOTS_SITEMAPS, ROBOTS_WILD };

@@ -10,7 +10,7 @@ pub fn match_with_asterisk( haystack: &str, needle: &str ) -> bool {
     }
 
     let mut loc = 0;
-    let segments = if needle.starts_with( '*' ) {
+    let segments = if !needle.starts_with( '*' ) {
         let mut _segments = needle.split( '*' );
         let first_seg = _segments.next( ).unwrap( );
         if !haystack.starts_with( first_seg ) { return false; }
@@ -21,11 +21,11 @@ pub fn match_with_asterisk( haystack: &str, needle: &str ) -> bool {
     };
 
     for seg in segments {
-        if seg == "" { /*DONOTHING*/ }
+        if seg == "" { /* DO NOTHING */ }
         else {
             match prefix_asterisk( seg, &haystack[ loc.. ], 0 ) {
                 Some( i ) => {
-                    loc += i
+                    loc += i + seg.len( );
                 }
                 None => {
                     return false;
@@ -33,6 +33,7 @@ pub fn match_with_asterisk( haystack: &str, needle: &str ) -> bool {
             }
         }
     }
+
     true
 }
 
@@ -94,7 +95,7 @@ mod tests{
     #[test]
     fn redundant_asterisks( ) {
         assert!( match_with_asterisk( "This should match", "**sh**ma*" ) );
-        assert!( match_with_asterisk( "Doesn't match", "**at**oe*" ) );
+        assert!( !match_with_asterisk( "Doesn't match", "**at**oe*" ) );
     }
 
 }
