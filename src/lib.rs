@@ -1,45 +1,93 @@
 //
-// TODO: Getters, Tests, Documentation/Code Rearrangement, HACK comments
-// TODO: RE: Code Rearrangement: Isolate the parsing logic from the main structure
+// TODO: Getters, Tests, Documentation, HACK comments
 
 extern crate reqwest;
 extern crate base_url;
-extern crate try_from;
 
 use std::convert::*;
 
+use std::fmt::{ Formatter, Display };
+use std::fmt::Result as DisplayResult;
+
 use reqwest::{ Response };
 
-use try_from::TryFrom;
 use base_url::BaseUrl;
+use base_url::TryFrom;
+
+mod path_match;
+use path_match::*;
+mod parse;
 
 /// A set of observed anomalies in the robots.txt file
 /// Anything not directly interacted with through the rest of this api is considered anomalous, and
 /// includes comments and illegal (cross host) rule lines as well as unknown or unimplemented
 /// directives.
+#[derive( Debug, Clone )]
 pub enum Anomaly {
     /// Any comment stored alongside some context, either the rest of the line the comment was found on
     /// or the line following. Context strings may be observed twice if a block comment is placed above
     /// a line with a directive and comment.
     Comment( String /*The comment*/, String /*The context*/ ),
     /// Rules whose names are not in the normal casing format, ie. "foo" rather than "Foo"
-    Casing( String, String ), // mostly here to guage if this type of error is common
+    Casing( String, String ),
     /// A Rule located outside of a User-agent section
     OrphanRule( Rule ),
     /// A User-agent line nested in another User-agent section which already contains one or more Rules
     RecursedUserAgent( String /*The agent's name*/ ),
+    /// A User-agent which contains both a wildcard and a specific User-agent name
+    RedundantWildcardUserAgent( String ),
     /// Any known directive not noramlly found in a User-agent section
     MissSectionedDirective( String, String ),
     /// Any directive which is unimplemented or otherwise unknown
     UnknownDirective( String, String ),
+    /// Any argument which is in a bad format ie. a non-url sitemap or non-integer delay
+    BadArgument( String, String ),
     /// Any line which isn't in the standard format for a robots.txt file, ie. a line without a ':'
     /// separator which is not a comment
     UnknownFormat( String ),
 }
 
-pub enum Rule { //TODO: consider rolling a Path type to deal with the BaseUrl to String interface
-    AllowAll( String ),
-    DisallowAll( String ),
+impl Display for Anomaly {
+    fn fmt( &self, formatter: &mut Formatter ) -> DisplayResult {
+        match self {
+            Anomaly::Comment( cmnt, ctxt ) => {
+                if ctxt.contains( "\n" ) || ctxt == "[EOF]" {
+                    write!( formatter, "{}{}", cmnt, ctxt )
+                } else {
+                    write!( formatter, "{}{}", ctxt, cmnt )
+                }
+            }
+            Anomaly::Casing( rule, path ) => {
+                write!( formatter, "Nonstandard casing: {}: {}", rule, path )
+            }
+            Anomaly::OrphanRule( rule ) => {
+                write!( formatter, "Orphaned Rule: {}", rule )
+            }
+            Anomaly::RecursedUserAgent( name ) => {
+                write!( formatter, "Recursed User-agent: {}", name )
+            }
+            Anomaly::RedundantWildcardUserAgent( name ) => {
+                write!( formatter, "Specific User-agent: {} found after a wildcard", name )
+            }
+            Anomaly::MissSectionedDirective( drctv, arg ) => {
+                write!( formatter, "{}: {}", drctv, arg )
+            }
+            Anomaly::UnknownDirective( drctv, arg ) => {
+                write!( formatter, "Unimplemented directive: {}: {}", drctv, arg )
+            }
+            Anomaly::BadArgument( drctv, arg ) => {
+                write!( formatter, "{} requires a different format for its argument {}", drctv, arg )
+            }
+            Anomaly::UnknownFormat( line ) => {
+                write!( formatter, "Unknown line: {}", line )
+            }
+        }
+    }
+}
+
+/// Represents a Rule line found in a User-agent section
+#[derive( Debug, Clone, PartialEq, Eq )]
+pub enum Rule {
     Allow( String ),
     Disallow( String ),
     /* TODO:
@@ -49,85 +97,57 @@ pub enum Rule { //TODO: consider rolling a Path type to deal with the BaseUrl to
 
 }
 
-pub struct UserAgent {
+impl Rule {
+
+    fn applies( &self, url: &BaseUrl ) -> bool {
+        let url_specificity = Self::path_specificity( url.path( ) );
+        let self_specificity;
+        let url_path = url.path( ).split( '/' );
+        let self_path = match self {
+            Rule::Allow( path ) | Rule::Disallow( path ) => {
+                if path == "/" || path.is_empty( ) { return true; }
+                self_specificity = Self::path_specificity( path );
+                path.split( '/' )
+            }
+        };
+
+        if url_specificity < self_specificity {
+            false
+        } else {
+            for segments in url_path.zip( self_path ) {
+                let ( url_seg, self_seg ) = segments;
+                if !match_with_asterisk( url_seg, self_seg ) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+}
+
+impl Display for Rule {
+    fn fmt( &self, formatter: &mut Formatter ) -> DisplayResult {
+        match self {
+            Rule::Allow( path ) => { write!( formatter, "Allow: {}", path ) }
+            Rule::Disallow( path ) => { write!( formatter, "Disallow: {}", path ) }
+        }
+    }
+}
+
+/// A User-agent section and all names, rules and anomalies associated
+#[derive( Debug, Clone )]
+struct UserAgent {
     names: Vec< String >,
     rules: Vec< Rule >,
     anomalies: Vec< Anomaly >,
 }
 
-pub struct RobotsParser {
-    host: BaseUrl,
-    sitemaps: Vec<BaseUrl>,
-    agents: Vec<UserAgent>,
-    anomalies: Vec< Anomaly >,
-}
-
-enum R_State { //Recursed state; useragent sections don't recurse, they add
-    Comment( UserAgent, String ),
-    Normal( UserAgent ),
-}
-
-enum State {
-    Comment( RobotsParser, String ), //We have a comment, but we can't see any context yet
-    Agent( RobotsParser, R_State ), //We are inside of a useragent section
-    Normal( RobotsParser ), //Any lines at the root level (those without a useragent association)
-}
-
-enum DirectiveResult<'a> {
-    Ok_UserAgent( String ),
-    Ok_Rule( Rule ),
-    Ok_Sitemap( &'a str ),
-    //Ok_RequestRate( u32 ),
-    //Ok_CrawlDelay( u32 ),
-    Unknown(),
-}
-
-fn parse_directive<'a>( directive: &str, argument: &'a str ) -> DirectiveResult< 'a > {
-    match directive {
-        "User-agent" => {
-            DirectiveResult::Ok_UserAgent( argument.to_string( ) )
-        }
-        "Disallow" => {
-            DirectiveResult::Ok_Rule( Rule::new( false, argument.to_string( ) ) )
-        }
-        "Allow" => {
-            DirectiveResult::Ok_Rule( Rule::new( true, argument.to_string( ) ) )
-        }
-        "Sitemap" => {
-            DirectiveResult::Ok_Sitemap( argument )
-        }
-        _ => {
-            DirectiveResult::Unknown()
-        }
-    }
-}
-
-impl Rule {
-
-    fn new( allowance: bool, path: String ) -> Rule {
-        match allowance {
-            true => {
-                if path == "*" {
-                    Rule::AllowAll( path )
-                } else {
-                    Rule::Allow( path )
-                }
-            }
-            false => {
-                if path == "*" {
-                    Rule::DisallowAll( path )
-                } else {
-                    Rule::Disallow( path )
-                }
-            }
-        }
-    }
-
-}
-
 impl UserAgent {
 
-    fn new( agent: String ) -> Self {
+    fn new( mut agent: String ) -> Self {
+        if agent.is_empty( ) {
+            agent.push_str( "*" );
+        }
         UserAgent{
             names: vec!( agent.to_string( ) ),
             rules: Vec::new( ),
@@ -140,6 +160,11 @@ impl UserAgent {
     }
 
     fn add_agent( &mut self, name: String ) {
+
+        if name == "*" || self.names.contains( &String::from( "*" ) ) {
+            self.anomalies.push( Anomaly::RedundantWildcardUserAgent( name.clone( ) ) );
+        }
+
         if self.is_empty( ) {
             self.names.push( name );
         } else {
@@ -158,251 +183,20 @@ impl UserAgent {
     fn add_anomaly( &mut self, anomaly: Anomaly ) {
         self.anomalies.push( anomaly );
     }
-}
 
-impl R_State {
+    fn applies( &self, user_agent: &str ) -> bool {
 
-    fn empty_line( self ) -> UserAgent {
-
-        match self {
-            R_State::Comment( mut u, s ) => {
-                u.add_comment( "".to_string( ), s );
-                u
-            },
-            R_State::Normal( u ) => {
-                u
-            },
-        }
-    }
-
-    fn comment( self, line: &str ) -> Self {
-
-        match self {
-            R_State::Comment( u, mut s ) => {
-                s.push_str( "\n" );
-                s.push_str( line );
-                R_State::Comment( u, s )
-            },
-            R_State::Normal( u ) => R_State::Comment( u, String::from( line ) ),
-        }
-    }
-
-    fn context_comment( self, context: &str, comment: &str ) -> Self {
-
-        match self {
-            R_State::Comment( mut u, s ) => {
-                u.add_comment( context.to_string( ), s.to_string( ) );
-                u.add_comment( context.to_string( ), comment.to_string( ) );
-                R_State::Normal( u )
-            }
-            R_State::Normal( mut u ) => {
-                u.add_comment( context.to_string( ), comment.to_string( ) );
-                R_State::Normal( u )
-            }
-        }
-    }
-
-    fn directive_line( self, mut directive: String, argument: String ) -> Self {
-
-        let mut user_agent;
-
-        match self {
-            R_State::Comment( mut u, s ) => {
-                let mut context = format!( "{}: {}", directive, argument );
-                u.add_comment( context, s.to_string( ) );
-                user_agent = u;
-            }
-            R_State::Normal( u ) => {
-                user_agent = u;
-            }
-        }
-
-        //HACK: Space saving is possible by moving the Casing anomaly check
-        if directive.starts_with( | c: char |( c.is_lowercase( ) ) ) {
-            user_agent.add_anomaly( Anomaly::Casing( directive.to_string( ), argument.to_string( ) ) );
-            //NOTE: We don't ignore the casing anomaly, our goal is to be as permissive as possible
-            directive.get_mut(0..1).map( | c |{ c.make_ascii_uppercase( ); &*c } );
-        }
-
-        match parse_directive( &directive, &argument ) {
-            DirectiveResult::Ok_UserAgent( ua ) => {
-                user_agent.add_agent( ua );
-                R_State::Normal( user_agent )
-            }
-            DirectiveResult::Ok_Rule( r ) => {
-                user_agent.add_rule( r );
-                R_State::Normal( user_agent )
-            }
-            DirectiveResult::Unknown() => {
-                user_agent.add_anomaly(
-                    Anomaly::UnknownDirective( directive.to_string( ),
-                                               argument.to_string( ) )
-                );
-                R_State::Normal( user_agent )
-            }
-            _ => {
-                user_agent.add_anomaly(
-                    Anomaly::MissSectionedDirective( directive.to_string( ), argument.to_string( ) )
-                );
-                R_State::Normal( user_agent )
-            }
-        }
-    }
-
-    fn anomaly( self, line: &str ) -> Self {
-
-        match self {
-            R_State::Comment( mut u, s ) => {
-                u.add_comment( s.to_string( ), line.to_string( ) );
-                R_State::Normal( u )
-            }
-            R_State::Normal( mut u ) => {
-                u.add_anomaly( Anomaly::UnknownFormat( line.to_string( ) ) );
-                R_State::Normal( u )
-            }
-        }
+        self.names.iter( ).any( | name |{
+            user_agent.starts_with( name ) || name == "*"
+        } )
     }
 }
-
-impl State {
-
-    fn empty_line( self ) -> Self {
-
-        match self {
-            State::Comment( r, s ) => {
-                State::Comment( r, s )
-            }
-            State::Agent( mut r, s ) => {
-                r.add_agent( s.empty_line( ) );
-                State::Normal( r )
-            }
-            State::Normal( r ) => {
-                State::Normal( r )
-            }
-        }
-    }
-
-    fn comment( self, line: &str ) -> Self {
-
-        match self {
-            State::Comment( r, mut s ) => {
-                s.push_str( "\n" );
-                s.push_str( line );
-                State::Comment( r, s )
-            },
-            State::Agent( r, mut s ) => {
-                s = s.comment( line );
-                State::Agent( r, s )
-            },
-            State::Normal( r ) => State::Comment( r, String::from( line ) ),
-        }
-    }
-
-    fn context_comment( self, context: &str, comment: &str ) -> Self {
-
-        match self {
-            State::Comment( mut r, s ) =>{
-                r.add_comment( context.to_string( ), s.to_string( ) );
-                r.add_comment( context.to_string( ), comment.to_string( ) );
-                State::Normal( r )
-            }
-            State::Agent( r, mut s ) => {
-                s = s.context_comment( context, comment );
-                State::Agent( r, s )
-            }
-            State::Normal( mut r ) => {
-                r.add_comment( context.to_string( ), comment.to_string( ) );
-                State::Normal( r )
-            }
-        }
-    }
-
-    fn directive_line( self, mut directive: String , argument: String ) -> Self {
-
-        let mut robots;
-
-        match self {
-            State::Comment( mut r, s ) => {
-                let mut context = format!( "{}: {}", directive, argument );
-                r.add_comment( context, s.to_string( ) );
-                robots = r;
-            }
-            State::Agent( r, mut s ) => {
-                s = s.directive_line( directive, argument );
-                return State::Agent( r, s );
-            }
-            State::Normal( r ) => {
-                robots = r;
-            }
-        }
-
-        //HACK: Space saving is possible by moving the Casing anomaly check
-        if directive.starts_with( | c: char |( c.is_lowercase( ) ) ) {
-            robots.add_anomaly( Anomaly::Casing( directive.to_string( ), argument.to_string( ) ) );
-            //NOTE: We don't ignore the casing anomaly, our goal is to be as permissive as possible
-            directive.get_mut(0..1).map( | c |{ c.make_ascii_uppercase( ); &*c } );
-        }
-
-        match parse_directive( &directive, &argument ) {
-            DirectiveResult::Ok_UserAgent( ua ) => {
-                State::Agent( robots, R_State::Normal( UserAgent::new( ua ) ) )
-            }
-            DirectiveResult::Ok_Rule( r ) => {
-                robots.add_anomaly( Anomaly::OrphanRule( r ) );
-                State::Normal( robots )
-            }
-            DirectiveResult::Ok_Sitemap( s ) => {
-                let mut sitemap_url = robots.host_url( );
-                sitemap_url.set_path( s );
-                robots.add_sitemap( sitemap_url );
-                State::Normal( robots )
-            }
-//            DirectiveResult::Ok_RequestRate( r ) => {}
-//            DirectiveResult::Ok_CrawlDelay( d ) = > {}
-            DirectiveResult::Unknown() => {
-                robots.add_anomaly(
-                    Anomaly::UnknownDirective( directive.to_string( ),
-                                               argument.to_string( ) )
-                );
-                State::Normal( robots )
-            }
-        }
-    }
-
-    fn anomaly( self, line: &str ) -> Self {
-        match self {
-            State::Comment( mut r, s ) => {
-                r.add_comment( line.to_string( ), s.to_string( ) );
-                r.add_unknown( s.to_string( ) );
-                State::Normal( r )
-            }
-            State::Agent( r, mut s ) => {
-                s = s.anomaly( line );
-                State::Agent( r, s )
-            }
-            State::Normal( mut r ) => {
-                r.add_unknown( line.to_string( ) );
-                State::Normal( r )
-            }
-        }
-    }
-
-    fn eof( self ) -> RobotsParser {
-        match self {
-            State::Comment( mut r, s ) => {
-                r.add_comment( "[EOF]".to_string( ), s.to_string( ) );
-                r
-            }
-            State::Agent( mut r, s ) => {
-                r.add_agent( s.empty_line( ) );
-                r
-            }
-            State::Normal( r ) => {
-                r
-            }
-        }
-
-    }
+/// Represents a parsed robots.txt file
+pub struct RobotsParser {
+    host: BaseUrl,
+    sitemaps: Vec<BaseUrl>,
+    agents: Vec<UserAgent>,
+    anomalies: Vec< Anomaly >,
 }
 
 impl RobotsParser {
@@ -431,17 +225,32 @@ impl RobotsParser {
         self.anomalies.push( Anomaly::UnknownFormat( line ) );
     }
 
+    fn get_allowances( &self, user_agent: &str ) -> Vec<Rule> {
+        let agents = self.agents.iter( ).filter(
+            | agent: &&UserAgent | { agent.applies( user_agent ) }
+        );
+
+        let mut ret = Vec::new( );
+
+        for agent in agents {
+            ret.append( &mut agent.rules.clone( ) );
+        }
+
+        ret
+    }
+
     /***********
      * Creation
      ******/
 
     pub fn guess_robots_url( &self ) -> BaseUrl {
         let mut ret = self.host.clone( );
+        //strip the url
         ret.set_path( "/robots.txt" );
         return ret;
     }
 
-    pub fn from_response( mut response: Response ) -> RobotsParser {
+    pub fn from_response( mut response: Response ) -> Self {
         assert!( response.status( ).is_success( ) );
 
         //NOTE: brittle
@@ -459,59 +268,11 @@ impl RobotsParser {
         Self::parse( host, text )
     }
 
-    //HACK: Best entry point into the code, understanding this is the key to adding any feature
-    pub fn parse< S: Into<String> >( host: BaseUrl, text: S ) -> RobotsParser {
-        let text = text.into( ); //Not a one-liner to appease lifetimes
-        let lines = text.lines( );
-        let ret = RobotsParser{
-            host: host,
-            sitemaps: Vec::new( ),
-            agents: Vec::new( ),
-            anomalies: Vec::new( ),
-        };
+    pub fn from_stringable < S: Into< String > > ( stringable: S, host: BaseUrl ) -> Self {
 
-        let mut state = State::Normal( ret );
+        let text = stringable.into( );
 
-        for _line in lines {
-            //NOTE: in both of the split_at directives the split character goes into r
-            let mut line = _line.trim( ); //clear any whitespace
-
-            /***********
-             * Empty Lines
-             ******/
-            if line.is_empty( ) {
-                state = state.empty_line( );
-                continue;
-            }
-
-            /***********
-             * Comments
-             ******/
-            if line.starts_with( "#" ) {
-                state = state.comment( line );
-                continue;
-            } else if line.contains( "#" ) {
-                let ( l, r ) = line.split_at( line.find( "#" ).unwrap( ) );
-                state = state.context_comment( l, r );
-                line = l.trim( );
-            }
-
-            /***********
-             * Directives
-             ******/
-            if line.contains( ":" ) {
-                let ( l, r ) = line.split_at( line.find( ":" ).unwrap( ) );
-                state = state.directive_line( l.to_string( ),
-                                              r.trim_left_matches( ':' ).to_string( ) );
-            } else {
-                /***********
-                 * Everything else
-                 ******/
-                state = state.anomaly( line );
-            }
-        }
-
-        state.eof( )
+        Self::parse( host, text )
     }
 
     /***********
@@ -521,5 +282,36 @@ impl RobotsParser {
     pub fn host_url( &self ) -> BaseUrl {
         self.host.clone( )
     }
-}
 
+    pub fn get_sitemaps( &self ) -> Vec<BaseUrl> {
+        self.sitemaps.clone( )
+    }
+
+    pub fn get_anomalies( &self ) -> Vec<Anomaly> {
+
+        let mut ret = self.anomalies.clone( );
+
+        for agent in self.agents.iter( ) {
+            ret.append( &mut agent.anomalies.clone( ) );
+        }
+
+        ret
+    }
+
+    /// Given a url and a user agent string determines if this robots.txt disallows browsing to that
+    /// url. This is generally understood as more of a suggestion than a rule.
+    //HACK: Can we combine the search through the UserAgents and the search for allowances in a way
+    // which is clean?
+    pub fn is_allowed( &self, url: &BaseUrl, user_agent: &str ) -> bool {
+
+        assert!( url.host( ) == self.host_url( ).host( ) );
+
+        for rule in self.get_allowances( user_agent ) {
+            if rule.applies( &url ) {
+                return rule.is_allow( );
+            }
+        }
+        true
+    }
+
+}

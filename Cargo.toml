@@ -1,15 +1,12 @@
 [package]
-name = "rs-pider-robots"
+name = "rs_pider_robots"
 version = "0.1.0"
 authors = ["Brady McDonough <brady.mcd.codes@gmail.com>"]
 description = "The robots.txt parsing module for rs-pider"
 
 [dependencies]
-# Maybe version gate Reqwest along with some other libraries
+# DEFINITELY version gate Reqwest, it drives up compile times
 reqwest = "^0.9"
 
 [dependencies.base_url]
-version = "^0.0.8"
-
-[dependencies.try_from]
-version = "0.2.2"
+version = "^0.0.10"
