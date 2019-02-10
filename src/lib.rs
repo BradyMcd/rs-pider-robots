@@ -1,23 +1,27 @@
 //
 // TODO: Getters, Tests, Documentation, HACK comments
 
-extern crate reqwest;
 extern crate base_url;
+
+#[cfg( fetch )]
+extern crate reqwest;
 
 use std::convert::*;
 
 use std::fmt::{ Formatter, Display };
 use std::fmt::Result as DisplayResult;
 
+#[cfg( fetch ) ]
 use reqwest::{ Response };
 
 use base_url::BaseUrl;
-use base_url::TryFrom;
 
 mod path_match;
 use path_match::*;
 mod parse;
 
+
+//I wanna re-arrange this
 /// A set of observed anomalies in the robots.txt file
 /// Anything not directly interacted with through the rest of this api is considered anomalous, and
 /// includes comments and illegal (cross host) rule lines as well as unknown or unimplemented
@@ -47,6 +51,7 @@ pub enum Anomaly {
     UnknownFormat( String ),
 }
 
+//I really wanna rearrange this
 impl Display for Anomaly {
     fn fmt( &self, formatter: &mut Formatter ) -> DisplayResult {
         match self {
@@ -76,7 +81,7 @@ impl Display for Anomaly {
                 write!( formatter, "Unimplemented directive: {}: {}", drctv, arg )
             }
             Anomaly::BadArgument( drctv, arg ) => {
-                write!( formatter, "{} requires a different format for its argument {}", drctv, arg )
+                write!( formatter, "Bad argument: {}: {}", drctv, arg )
             }
             Anomaly::UnknownFormat( line ) => {
                 write!( formatter, "Unknown line: {}", line )
@@ -230,7 +235,7 @@ impl RobotsParser {
             | agent: &&UserAgent | { agent.applies( user_agent ) }
         );
 
-        let mut ret = Vec::new( );
+       let mut ret = Vec::new( );
 
         for agent in agents {
             ret.append( &mut agent.rules.clone( ) );
@@ -243,17 +248,18 @@ impl RobotsParser {
      * Creation
      ******/
 
+    // NOTE: This function being a function makes sense, the implementation makes no sense
     pub fn guess_robots_url( &self ) -> BaseUrl {
         let mut ret = self.host.clone( );
-        //strip the url
+        ret.strip( );
         ret.set_path( "/robots.txt" );
         return ret;
     }
 
+    #[cfg( fetch )]
     pub fn from_response( mut response: Response ) -> Self {
         assert!( response.status( ).is_success( ) );
 
-        //NOTE: brittle
         let mut host = match BaseUrl::try_from( response.url( ).clone( ) ) {
             Ok( u ) => u,
             Err( _e ) => panic!( ),
@@ -287,7 +293,25 @@ impl RobotsParser {
         self.sitemaps.clone( )
     }
 
-    pub fn get_anomalies( &self ) -> Vec<Anomaly> {
+    //NOTE: in the anomaly getters I should be less afraid of returning an iterator
+    pub fn get_toplevel_anomalies( &self ) -> &Vec< Anomaly > {
+        &self.anomalies
+    }
+
+    pub fn get_agent_anomalies( &self, user_agent: &str ) -> std::slice::Iter< &Anomaly > {
+        let agents = self.agents.iter( ).filter(
+            | agent: &&UserAgent | { agent.applies( user_agent ) }
+        );
+
+        let mut ret = Vec::new( ).iter( );
+        for agent in agents{
+            ret.chain( agent.anomalies.as_ref() );
+        }
+        ret
+    }
+
+    //NOTE:This is the getter to work on.
+    pub fn get_all_anomalies( &self ) -> Vec<Anomaly> {
 
         let mut ret = self.anomalies.clone( );
 
