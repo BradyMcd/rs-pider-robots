@@ -2,11 +2,18 @@
 name = "rs_pider_robots"
 version = "0.1.0"
 authors = ["Brady McDonough <brady.mcd.codes@gmail.com>"]
-description = "The robots.txt parsing module for rs-pider"
+description = "A robots.txt parsing module designed to be permissive for use on the web"
+categories = ["web-programming", "encoding", "parser-implementations"]
+keywords = ["robots.txt", "parser", "web", "spider"]
+
+
+[dependencies.reqwest]
+version = "^0.9"
+optional = true
 
 [dependencies]
-# DEFINITELY version gate Reqwest, it drives up compile times
-reqwest = "^0.9"
+base_url = "^1.0.0"
 
-[dependencies.base_url]
-version = "^0.0.10"
+[features]
+default = []
+fetch = ["reqwest"]
