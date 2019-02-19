@@ -1,18 +1,18 @@
 [package]
 name = "rs_pider_robots"
-version = "0.1.0"
-authors = ["Brady McDonough <brady.mcd.codes@gmail.com>"]
 description = "A robots.txt parsing module designed to be permissive for use on the web"
+readme = "README.md"
+authors = ["Brady McDonough <brady.mcd.codes@gmail.com>"]
+version = "0.1.0"
 categories = ["web-programming", "encoding", "parser-implementations"]
 keywords = ["robots.txt", "parser", "web spider", "web crawler", "web", "spider", "crawler"]
 
+[dependencies]
+base_url = "^1.0.0"
 
 [dependencies.reqwest]
 version = "^0.9"
 optional = true
-
-[dependencies]
-base_url = "^1.0.0"
 
 [features]
 default = []
