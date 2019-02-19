@@ -112,6 +112,8 @@ impl Eq for UserAgent {}
 impl PartialOrd for UserAgent {
     // TODO: possibly give this another look. Maybe I should care about name length more than number of
     // names
+    // NOTE: This definitely violates certain intuitions, there exists a pair of UserAgents A,B which
+    // return true for both A > B and B > A where both contain wildcard agent names
     fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
         let wildcard = String::from( "*" );
 
@@ -225,7 +227,7 @@ impl R_State {
         }
     }
 
-    fn directive_line( self, mut directive: String, argument: String ) -> Self {
+    fn directive_line( self, directive: String, argument: String ) -> Self {
 
         let mut user_agent;
 
@@ -350,7 +352,7 @@ impl State {
         }
     }
 
-    fn directive_line( self, mut directive: String , argument: String ) -> Self {
+    fn directive_line( self, directive: String , argument: String ) -> Self {
 
         let mut robots;
 
