@@ -20,8 +20,6 @@ mod path_match;
 use path_match::*;
 mod parse;
 
-
-//I wanna re-arrange this
 /// A set of observed anomalies in the robots.txt file
 /// Anything not directly interacted with through the rest of this api is considered anomalous, and
 /// includes comments and illegal (cross host) rule lines as well as unknown or unimplemented
@@ -51,7 +49,6 @@ pub enum Anomaly {
     UnknownFormat( String ),
 }
 
-//I really wanna rearrange this
 impl Display for Anomaly {
     fn fmt( &self, formatter: &mut Formatter ) -> DisplayResult {
         match self {
@@ -293,31 +290,30 @@ impl RobotsParser {
         self.sitemaps.clone( )
     }
 
-    //NOTE: in the anomaly getters I should be less afraid of returning an iterator
     pub fn get_toplevel_anomalies( &self ) -> &Vec< Anomaly > {
         &self.anomalies
     }
 
-    pub fn get_agent_anomalies( &self, user_agent: &str ) -> std::slice::Iter< &Anomaly > {
+    pub fn get_agent_anomalies( &self, user_agent: &str ) -> Vec< &Anomaly > {
         let agents = self.agents.iter( ).filter(
             | agent: &&UserAgent | { agent.applies( user_agent ) }
         );
 
-        let mut ret = Vec::new( ).iter( );
-        for agent in agents{
-            ret.chain( agent.anomalies.as_ref() );
+        let mut ret = Vec::new( );
+
+        for agent in agents {
+            ret.extend( agent.anomalies.iter( ) )
         }
+
         ret
     }
 
-    //NOTE:This is the getter to work on.
-    pub fn get_all_anomalies( &self ) -> Vec<Anomaly> {
+    pub fn get_all_anomalies( &self ) -> Vec<&Anomaly> {
 
-        let mut ret = self.anomalies.clone( );
+        let mut ret = Vec::new( );
 
-        for agent in self.agents.iter( ) {
-            ret.append( &mut agent.anomalies.clone( ) );
-        }
+        ret.extend( self.anomalies.iter( ) );
+        ret.extend( self.get_agent_anomalies( "*" ) );
 
         ret
     }
