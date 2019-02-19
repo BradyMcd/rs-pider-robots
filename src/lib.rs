@@ -290,10 +290,16 @@ impl RobotsParser {
         self.sitemaps.clone( )
     }
 
+    /// Retreives any anomalies appearing at the top level of the robots.txt document. Any anomaly not
+    /// observed inside of a User-agent section is returned by this function and may contain things like
+    /// orphaned and unimplemented directives.
     pub fn get_toplevel_anomalies( &self ) -> &Vec< Anomaly > {
         &self.anomalies
     }
 
+    /// Retreives any anomalies appearing under a User-agent section as determined by the agent's
+    /// .applies( ) function. That means that agent names starting with the supplied string are returned
+    /// and also that the asterisk(*) character can be supplied to indicate all agents.
     pub fn get_agent_anomalies( &self, user_agent: &str ) -> Vec< &Anomaly > {
         let agents = self.agents.iter( ).filter(
             | agent: &&UserAgent | { agent.applies( user_agent ) }
@@ -308,6 +314,7 @@ impl RobotsParser {
         ret
     }
 
+    /// Retrieves a set of all the anomalous lines which were found when parsing the robots.txt file
     pub fn get_all_anomalies( &self ) -> Vec<&Anomaly> {
 
         let mut ret = Vec::new( );
