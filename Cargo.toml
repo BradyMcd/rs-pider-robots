@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Brady McDonough <brady.mcd.codes@gmail.com>"]
 description = "A robots.txt parsing module designed to be permissive for use on the web"
 categories = ["web-programming", "encoding", "parser-implementations"]
-keywords = ["robots.txt", "parser", "web", "spider"]
+keywords = ["robots.txt", "parser", "web spider", "web crawler", "web", "spider", "crawler"]
 
 
 [dependencies.reqwest]
