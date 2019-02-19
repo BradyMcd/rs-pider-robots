@@ -240,15 +240,6 @@ impl R_State {
             }
         }
 
-        //NOTE: This isn't going to capture all casing anomalies on the web, "User-Agent" for example
-        // can be found on many very popular sites, even in the same file where "User-agent" is used
-        //NOTE: Space saving is possible by moving the Casing anomaly check
-        if directive.starts_with( | c: char |( c.is_lowercase( ) ) ) {
-            user_agent.add_anomaly( Anomaly::Casing( directive.to_string( ), argument.to_string( ) ) );
-            //NOTE: We don't ignore the casing anomaly, our goal is to be as permissive as possible
-            directive.get_mut(0..1).map( | c |{ c.make_ascii_uppercase( ); &*c } );
-        }
-
         match parse_directive( &directive, &argument ) {
             DirectiveResult::Ok_UserAgent( ua ) => {
                 user_agent.add_agent( ua );
@@ -277,6 +268,18 @@ impl R_State {
                 R_State::Normal( user_agent )
             }
         }
+    }
+
+    fn bad_casing( self, directive: String, argument: &str ) -> Self {
+
+        match self {
+            R_State::Normal( mut u ) => {
+                u.add_anomaly( Anomaly::Casing( directive, argument.to_string( ) ) );
+                R_State::Normal( u )
+            }
+            _ => { unreachable!( ) }
+        }
+
     }
 
     fn anomaly( self, line: &str ) -> Self {
@@ -366,13 +369,6 @@ impl State {
             }
         }
 
-        //HACK: Space saving is possible by moving the Casing anomaly check
-        if directive.starts_with( | c: char |( c.is_lowercase( ) ) ) {
-            robots.add_anomaly( Anomaly::Casing( directive.to_string( ), argument.to_string( ) ) );
-            //NOTE: We don't ignore the casing anomaly, our goal is to be as permissive as possible
-            directive.get_mut(0..1).map( | c |{ c.make_ascii_uppercase( ); &*c } );
-        }
-
         match parse_directive( &directive, &argument ) {
             DirectiveResult::Ok_UserAgent( ua ) => {
                 State::Agent( robots, R_State::Normal( UserAgent::new( ua ) ) )
@@ -399,6 +395,21 @@ impl State {
                 );
                 State::Normal( robots )
             }
+        }
+    }
+
+    fn bad_casing( self, directive: String, argument: &str ) -> Self {
+
+        match self{
+            State::Normal( mut r ) => {
+                r.add_anomaly( Anomaly::Casing( directive, argument.to_string( ) ) );
+                State::Normal( r )
+            }
+            State::Agent( r, mut s ) => {
+                s = s.bad_casing( directive, argument );
+                State::Agent( r, s )
+            }
+            _ => { unreachable!( ) }
         }
     }
 
@@ -483,10 +494,24 @@ impl RobotsParser {
              * Directives
              ******/
             if line.contains( ":" ) {
-                let ( l, r ) = line.split_at( line.find( ":" ).unwrap( ) );
-                state = state.directive_line( l.to_string( ),
-                                              r.trim_left_matches( | c:char |{ c.is_whitespace( ) ||
-                                                                        c == ':' } ).to_string( ) );
+                let ( _l, r ) = line.split_at( line.find( ":" ).unwrap( ) );
+                let l = if _l.starts_with( | c: char |( c.is_lowercase( ) ) )
+                    || _l.get( 1.. ).unwrap( ).find( |c: char| {c.is_uppercase( ) } ).is_some( ) {
+
+                        state = state.bad_casing( _l.to_string( ), r );
+
+                        let mut proper_case = _l.to_ascii_lowercase( );
+                        proper_case.get_mut(0..1).map( | c |{ c.make_ascii_uppercase( ); &*c } );
+                        proper_case
+                    } else {
+                        _l.to_string( )
+                    };
+                state = state.directive_line(
+                    l,
+                    r.trim_left_matches( | c:char | {
+                        c.is_whitespace( ) || c == ':'
+                    } ).to_string( )
+                );
             } else {
                 /***********
                  * Everything else
