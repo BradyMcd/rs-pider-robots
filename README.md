@@ -5,7 +5,8 @@ one way or the other, record everything it sees in a given document. Comments, u
 unimplemented, misplaced directives, all are recorded as an Anomaly and stored in a Vec based on where
 they are noted. The goal of this project is to later act as a module in a larger web spider, as that 
 project evolves so will this. Because it's meant for use reading the web no facilities are provided to
-create a robots.txt file of your own and no serialization of the original file is stored.
+create a robots.txt file of your own and no serialization of the original file is stored only the 
+encoding.
 
 ## Permissions, and how they are determined
 
