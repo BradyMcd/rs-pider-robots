@@ -8,6 +8,7 @@ extern crate reqwest;
 
 use std::convert::*;
 
+use std::cmp::Ordering;
 use std::fmt::{ Formatter, Display };
 use std::fmt::Result as DisplayResult;
 
@@ -19,18 +20,15 @@ use base_url::BaseUrl;
 mod path_match;
 use path_match::*;
 mod parse;
-
-/// A set of observed anomalies in the robots.txt file
-/// Anything not directly interacted with through the rest of this api is considered anomalous, and
-/// includes comments and illegal (cross host) rule lines as well as unknown or unimplemented
-/// directives.
-#[derive( Debug, Clone )]
+/* Still here so I can figure out how to move documentation around
+#[derive( PartialEq, Debug, Clone )]
 pub enum Anomaly {
     /// Any comment stored alongside some context, either the rest of the line the comment was found on
     /// or the line following. Context strings may be observed twice if a block comment is placed above
     /// a line with a directive and comment.
     Comment( String /*The comment*/, String /*The context*/ ),
-    /// Rules whose names are not in the normal casing format, ie. "foo" rather than "Foo"
+    /// Rules whose names are not in the normal casing format, ie. "foo-bar" or "fOo-BaR" rather than
+    /// "Foo-bar"
     Casing( String, String ),
     /// A Rule located outside of a User-agent section
     OrphanRule( Rule ),
@@ -48,44 +46,59 @@ pub enum Anomaly {
     /// separator which is not a comment
     UnknownFormat( String ),
 }
+ */
 
-impl Display for Anomaly {
-    fn fmt( &self, formatter: &mut Formatter ) -> DisplayResult {
-        match self {
-            Anomaly::Comment( cmnt, ctxt ) => {
-                if ctxt.contains( "\n" ) || ctxt == "[EOF]" {
-                    write!( formatter, "{}{}", cmnt, ctxt )
-                } else {
-                    write!( formatter, "{}{}", ctxt, cmnt )
-                }
-            }
-            Anomaly::Casing( rule, path ) => {
-                write!( formatter, "Nonstandard casing: {}: {}", rule, path )
-            }
-            Anomaly::OrphanRule( rule ) => {
-                write!( formatter, "Orphaned Rule: {}", rule )
-            }
-            Anomaly::RecursedUserAgent( name ) => {
-                write!( formatter, "Recursed User-agent: {}", name )
-            }
-            Anomaly::RedundantWildcardUserAgent( name ) => {
-                write!( formatter, "Specific User-agent: {} found after a wildcard", name )
-            }
-            Anomaly::MissSectionedDirective( drctv, arg ) => {
-                write!( formatter, "{}: {}", drctv, arg )
-            }
-            Anomaly::UnknownDirective( drctv, arg ) => {
-                write!( formatter, "Unimplemented directive: {}: {}", drctv, arg )
-            }
-            Anomaly::BadArgument( drctv, arg ) => {
-                write!( formatter, "Bad argument: {}: {}", drctv, arg )
-            }
-            Anomaly::UnknownFormat( line ) => {
-                write!( formatter, "Unknown line: {}", line )
-            }
-        }
+///The EMH, Enum Match Helper. Please state the nature of your code generation emergency.
+macro_rules! EMH{
+    ( $type: ty ) => {
+        _
     }
 }
+macro_rules! anomaly_enum {
+    ( $( $n:expr ; $id:ident ; ( $( $arg:ty ),+ ) ; $header:expr ),+ ) => (
+        #[derive( PartialEq, Debug, Clone )]
+        pub enum Anomaly{
+            $(
+                $id ( $( $arg ),+ )
+            ),+
+        }
+
+        impl Anomaly {
+            fn order_helper( &self ) -> usize {
+                match self {
+                    $(
+                        Anomaly::$id ( $( EMH!( $arg ) ),+ ) => $n,
+                    )+
+                }
+
+            }
+            fn header_string( &self ) -> &str {
+                match self {
+                    $(
+                        Anomaly::$id ( $( EMH!( $arg ) ),+ ) => $header,
+                    )+
+                }
+            }
+        }
+
+    )
+}
+
+/// A set of observed anomalies in the robots.txt file
+/// Anything not directly interacted with through the rest of this api is considered anomalous, and
+/// includes comments and illegal (cross host) rule lines as well as unknown or unimplemented
+/// directives.
+anomaly_enum! (
+    1 ; Comment ; ( String, String ) ; "Comments:",
+    2 ; Casing ; ( String, String ) ; "Non-standard casing in directives:",
+    3 ; OrphanRule ; ( Rule ) ; "Rules found outside of User-agent sections:",
+    4 ; RecursedUserAgent ; ( String ) ; "User-agents found after a rule line:",
+    5 ; RedundantWildcardUserAgent ; ( String ) ; "Specified User-agents in a wildcard section:",
+    6 ; MissSectionedDirective ; ( String, String ) ; "Root directives found in a User-agent section:",
+    7 ; UnknownDirective ; ( String, String ) ; "Unimplemented or unknown directives found:",
+    8 ; BadArgument ; ( String, String ) ; "Poorly formatted arguments:",
+    9 ; UnknownFormat ; ( String ) ; "Poorly formatted lines:"
+);
 
 /// Represents a Rule line found in a User-agent section
 #[derive( Debug, Clone, PartialEq, Eq )]
@@ -291,15 +304,15 @@ impl RobotsParser {
     }
 
     /// Retreives any anomalies appearing at the top level of the robots.txt document. Any anomaly not
-    /// observed inside of a User-agent section is returned by this function and may contain things like
-    /// orphaned and unimplemented directives.
+    /// observed inside of a User-agent section is returned by this function and may contain things
+    /// like orphaned and unimplemented directives.
     pub fn get_toplevel_anomalies( &self ) -> &Vec< Anomaly > {
         &self.anomalies
     }
 
     /// Retreives any anomalies appearing under a User-agent section as determined by the agent's
-    /// .applies( ) function. That means that agent names starting with the supplied string are returned
-    /// and also that the asterisk(*) character can be supplied to indicate all agents.
+    /// .applies( ) function. That means that agent names starting with the supplied string are
+    /// returned and also that the asterisk(*) character can be supplied to indicate all agents.
     pub fn get_agent_anomalies( &self, user_agent: &str ) -> Vec< &Anomaly > {
         let agents = self.agents.iter( ).filter(
             | agent: &&UserAgent | { agent.applies( user_agent ) }
@@ -340,5 +353,4 @@ impl RobotsParser {
         }
         true
     }
-
 }
