@@ -245,31 +245,27 @@ impl R_State {
         match parse_directive( &directive, &argument ) {
             DirectiveResult::Ok_UserAgent( ua ) => {
                 user_agent.add_agent( ua );
-                R_State::Normal( user_agent )
             }
             DirectiveResult::Ok_Rule( r ) => {
                 user_agent.add_rule( r );
-                R_State::Normal( user_agent )
             }
             DirectiveResult::Unknown() => {
                 user_agent.add_anomaly(
                     Anomaly::UnknownDirective( directive.to_string( ),
                                                argument.to_string( ) )
                 );
-                R_State::Normal( user_agent )
             }
             DirectiveResult::Err_BadArg() => {
                 user_agent.add_anomaly( Anomaly::BadArgument( directive.to_string( ),
                                                               argument.to_string( ) ) );
-                R_State::Normal( user_agent )
             }
             _ => {
                 user_agent.add_anomaly(
                     Anomaly::MissSectionedDirective( directive.to_string( ), argument.to_string( ) )
                 );
-                R_State::Normal( user_agent )
             }
         }
+        R_State::Normal( user_agent )
     }
 
     fn bad_casing( self, directive: String, argument: &str ) -> Self {

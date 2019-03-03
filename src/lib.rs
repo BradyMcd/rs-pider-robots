@@ -48,13 +48,12 @@ pub enum Anomaly {
 }
  */
 
-//The EMH, Enum Match Helper. Please state the nature of your code generation emergency. This is
-//necessary to correctly trigger repition of the contents of the match parenthesis
-macro_rules! EMH {
+macro_rules! MatchHelper {
     ( $type: ty ) => {
         _
     }
 }
+
 macro_rules! anomaly_enum {
     ( $( $n:expr ; $id:ident ; ( $( $arg:ty ),+ ) ( $( $bind: ident ),+ ) ;
          $header:expr ; $fmt:expr ),+ ) => (
@@ -69,7 +68,7 @@ macro_rules! anomaly_enum {
             fn order_helper( &self ) -> usize {
                 match self {
                     $(
-                        Anomaly::$id ( $( EMH!( $arg ) ),+ ) => $n,
+                        Anomaly::$id ( $( MatchHelper!( $arg ) ),+ ) => $n,
                     )+
                 }
 
@@ -77,7 +76,7 @@ macro_rules! anomaly_enum {
             fn header_string( &self ) -> &str {
                 match self {
                     $(
-                        Anomaly::$id ( $( EMH!( $arg ) ),+ ) => $header,
+                        Anomaly::$id ( $( MatchHelper!( $arg ) ),+ ) => $header,
                     )+
                 }
             }
@@ -89,7 +88,6 @@ macro_rules! anomaly_enum {
                 }
             }
         }
-
     )
 }
 
@@ -99,9 +97,9 @@ macro_rules! anomaly_enum {
 /// directives.
 anomaly_enum! (
     1 ; Comment ; ( String, String ) ( comment, context ) ;
-    "Comments:" ; "{:1} \nWas commented on:\n{:0}",
+    "Comments:" ; "{1} \nWas commented on:\n{0}",
     2 ; Casing ; ( String, String ) ( directive, _argument ) ;
-    "Non-standard casing in directives:" ; "Directive {:0}:{:1} has odd casing",
+    "Non-standard casing in directives:" ; "Directive {0}:{1} has odd casing",
     3 ; OrphanRule ; ( Rule ) ( rule ) ;
     "Rules found outside of User-agent sections:" ; "Orphaned rule line: {}",
     4 ; RecursedUserAgent ; ( String ) ( agent );
@@ -109,11 +107,11 @@ anomaly_enum! (
     5 ; RedundantWildcardUserAgent ; ( String ) ( agent ) ;
     "Specified User-agents in a wildcard section:" ; "User-agent {} was mentioned after a wildcard",
     6 ; MissSectionedDirective ; ( String, String ) ( directive, argument ) ;
-    "Root directives found in a User-agent section:" ; "Directive {:0}: {:1} found under a User-agent",
+    "Root directives found in a User-agent section:" ; "Directive {0}: {1} found under a User-agent",
     7 ; UnknownDirective ; ( String, String ) ( directive, argument );
-    "Unimplemented or unknown directives found:" ; "Unknown directive: {:0}: {:1}",
+    "Unimplemented or unknown directives found:" ; "Unknown directive: {0}: {1}",
     8 ; BadArgument ; ( String, String ) ( directive, argument ) ;
-    "Poorly formatted arguments:" ; "The argument {:1} couldn't be parsed for a {:0} directive",
+    "Poorly formatted arguments:" ; "The argument {1} couldn't be parsed for a {0} directive",
     9 ; UnknownFormat ; ( String ) ( line ) ;
     "Poorly formatted lines:" ; "Unknown line format: {}"
 );
@@ -358,6 +356,8 @@ impl RobotsParser {
     }
 
     /// Retrieves a set of all the anomalous lines which were found when parsing the robots.txt file
+    /// Note that Anomalies are not necessarily reported in the order they were found in the document
+    /// and are instead sorted
     pub fn get_all_anomalies( &self ) -> Vec<&Anomaly> {
 
         let mut ret = Vec::new( );
