@@ -48,14 +48,16 @@ pub enum Anomaly {
 }
  */
 
-///The EMH, Enum Match Helper. Please state the nature of your code generation emergency.
-macro_rules! EMH{
+//The EMH, Enum Match Helper. Please state the nature of your code generation emergency. This is
+//necessary to correctly trigger repition of the contents of the match parenthesis
+macro_rules! EMH {
     ( $type: ty ) => {
         _
     }
 }
 macro_rules! anomaly_enum {
-    ( $( $n:expr ; $id:ident ; ( $( $arg:ty ),+ ) ; $header:expr ),+ ) => (
+    ( $( $n:expr ; $id:ident ; ( $( $arg:ty ),+ ) ( $( $bind: ident ),+ ) ;
+         $header:expr ; $fmt:expr ),+ ) => (
         #[derive( PartialEq, Debug, Clone )]
         pub enum Anomaly{
             $(
@@ -79,6 +81,13 @@ macro_rules! anomaly_enum {
                     )+
                 }
             }
+            fn describe( &self ) -> String {
+                match self {
+                    $(
+                        Anomaly::$id ( $( $bind ),+ ) => format!( $fmt, $( $bind ),+ ),
+                    )+
+                }
+            }
         }
 
     )
@@ -86,19 +95,40 @@ macro_rules! anomaly_enum {
 
 /// A set of observed anomalies in the robots.txt file
 /// Anything not directly interacted with through the rest of this api is considered anomalous, and
-/// includes comments and illegal (cross host) rule lines as well as unknown or unimplemented
+/// includes comments and ambiguously placed rule lines as well as unknown or unimplemented
 /// directives.
 anomaly_enum! (
-    1 ; Comment ; ( String, String ) ; "Comments:",
-    2 ; Casing ; ( String, String ) ; "Non-standard casing in directives:",
-    3 ; OrphanRule ; ( Rule ) ; "Rules found outside of User-agent sections:",
-    4 ; RecursedUserAgent ; ( String ) ; "User-agents found after a rule line:",
-    5 ; RedundantWildcardUserAgent ; ( String ) ; "Specified User-agents in a wildcard section:",
-    6 ; MissSectionedDirective ; ( String, String ) ; "Root directives found in a User-agent section:",
-    7 ; UnknownDirective ; ( String, String ) ; "Unimplemented or unknown directives found:",
-    8 ; BadArgument ; ( String, String ) ; "Poorly formatted arguments:",
-    9 ; UnknownFormat ; ( String ) ; "Poorly formatted lines:"
+    1 ; Comment ; ( String, String ) ( comment, context ) ;
+    "Comments:" ; "{:1} \nWas commented on:\n{:0}",
+    2 ; Casing ; ( String, String ) ( directive, _argument ) ;
+    "Non-standard casing in directives:" ; "Directive {:0}:{:1} has odd casing",
+    3 ; OrphanRule ; ( Rule ) ( rule ) ;
+    "Rules found outside of User-agent sections:" ; "Orphaned rule line: {}",
+    4 ; RecursedUserAgent ; ( String ) ( agent );
+    "User-agents found after a rule line:" ; "User-agent {} was found nested ambiguously and ignored",
+    5 ; RedundantWildcardUserAgent ; ( String ) ( agent ) ;
+    "Specified User-agents in a wildcard section:" ; "User-agent {} was mentioned after a wildcard",
+    6 ; MissSectionedDirective ; ( String, String ) ( directive, argument ) ;
+    "Root directives found in a User-agent section:" ; "Directive {:0}: {:1} found under a User-agent",
+    7 ; UnknownDirective ; ( String, String ) ( directive, argument );
+    "Unimplemented or unknown directives found:" ; "Unknown directive: {:0}: {:1}",
+    8 ; BadArgument ; ( String, String ) ( directive, argument ) ;
+    "Poorly formatted arguments:" ; "The argument {:1} couldn't be parsed for a {:0} directive",
+    9 ; UnknownFormat ; ( String ) ( line ) ;
+    "Poorly formatted lines:" ; "Unknown line format: {}"
 );
+
+impl PartialOrd for Anomaly {
+    fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
+        self.order_helper( ).partial_cmp( &rhs.order_helper( ) )
+    }
+}
+
+impl Display for Anomaly {
+    fn fmt( &self, f: &mut Formatter ) -> DisplayResult {
+        write!( f, "{}", self.describe( ) )
+    }
+}
 
 /// Represents a Rule line found in a User-agent section
 #[derive( Debug, Clone, PartialEq, Eq )]
