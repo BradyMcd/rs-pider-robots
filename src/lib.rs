@@ -3,16 +3,14 @@
 
 extern crate base_url;
 
-#[cfg( fetch )]
+#[cfg( feature="fetch" )]
 extern crate reqwest;
-
-use std::convert::*;
 
 use std::cmp::Ordering;
 use std::fmt::{ Formatter, Display };
 use std::fmt::Result as DisplayResult;
 
-#[cfg( fetch ) ]
+#[cfg( feature="fetch" ) ]
 use reqwest::{ Response };
 
 use base_url::BaseUrl;
@@ -53,6 +51,12 @@ macro_rules! MatchHelper {
         _
     }
 }
+macro_rules! FormatHelper {
+    ( $id: ident ) => {
+        "{}"
+    }
+}
+
 
 macro_rules! anomaly_enum {
     ( $( $n:expr ; $id:ident ; ( $( $arg:ty ),+ ) ( $( $bind: ident ),+ ) ;
@@ -80,6 +84,14 @@ macro_rules! anomaly_enum {
                     )+
                 }
             }
+            fn body_string( &self ) -> String {
+                match self {
+                    $(
+                        Anomaly::$id ( $( $bind ),+ ) => format!(
+                            concat!( $( FormatHelper!( $bind ) ),+ ), $( $bind ),+ ),
+                        )+
+                    }
+           }
             fn describe( &self ) -> String {
                 match self {
                     $(
@@ -96,6 +108,7 @@ macro_rules! anomaly_enum {
 /// includes comments and ambiguously placed rule lines as well as unknown or unimplemented
 /// directives.
 anomaly_enum! (
+    // TODO: Comment printing still looks a bit rough
     1 ; Comment ; ( String, String ) ( comment, context ) ;
     "Comments:" ; "{1} \nWas commented on:\n{0}",
     2 ; Casing ; ( String, String ) ( directive, _argument ) ;
@@ -286,7 +299,7 @@ impl RobotsParser {
      * Creation
      ******/
 
-    // NOTE: This function being a function makes sense, the implementation makes no sense
+    // NOTE: This function being a function makes sense, where it is makes less sense
     pub fn guess_robots_url( &self ) -> BaseUrl {
         let mut ret = self.host.clone( );
         ret.strip( );
@@ -294,7 +307,7 @@ impl RobotsParser {
         return ret;
     }
 
-    #[cfg( fetch )]
+    #[cfg( feature="fetch" )]
     pub fn from_response( mut response: Response ) -> Self {
         assert!( response.status( ).is_success( ) );
 
