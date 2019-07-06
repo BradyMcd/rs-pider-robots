@@ -6,9 +6,14 @@ authors = ["Brady McDonough <brady.mcd.codes@gmail.com>"]
 version = "0.1.0"
 categories = ["web-programming", "encoding", "parser-implementations"]
 keywords = ["robots.txt", "parser", "web spider", "web crawler", "web", "spider", "crawler"]
+edition = "2018"
 
 [dependencies]
 base_url = "^1.0.0"
+
+[dependencies.multi_order]
+version = "0.1.0"
+path = "../rs-multiqueue"
 
 [dependencies.reqwest]
 version = "^0.9"

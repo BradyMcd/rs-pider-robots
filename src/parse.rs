@@ -7,12 +7,12 @@ use std::usize::MAX;
 use base_url::BaseUrl;
 use base_url::TryFrom;
 
-use Anomaly;
-use Rule;
-use UserAgent;
-use RobotsParser;
+use crate::Anomaly;
+use crate::Rule;
+use crate::UserAgent;
+use crate::RobotsParser;
 
-impl Rule{
+impl Rule {
 
     fn new( allowance: bool, mut path: String ) -> Rule {
         if path.is_empty( ) {
