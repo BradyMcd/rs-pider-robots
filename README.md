@@ -24,4 +24,5 @@ this behavior.
 
 Currently 3 common-ish directives are not implemented, Host, Crawl-delay, and Request-rate. Crawl-delay
  and Request-rate are both planned for a later version and as I use the framework more I might find 
-enough Host directives to warrant their inclusion as well.
+enough Host directives to warrant their inclusion as well. In the meantime though you can technically
+implement these yourself by ```.filter()```ing for the UnknownDirective Anomaly and matching on it's contents.

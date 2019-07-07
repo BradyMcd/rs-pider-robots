@@ -2,18 +2,22 @@
 // TODO: Getters, Tests, Documentation, HACK comments
 
 extern crate base_url;
+extern crate multi_order;
 
 #[cfg( feature="fetch" )]
 extern crate reqwest;
 
-use std::cmp::Ordering;
+use std::convert::*;
+
 use std::fmt::{ Formatter, Display };
 use std::fmt::Result as DisplayResult;
 
-#[cfg( feature="fetch" ) ]
-use reqwest::{ Response };
-
 use base_url::BaseUrl;
+use multi_order::Enum;
+use multi_order::interior::sectioned_queue::*;
+
+#[cfg( fetch ) ]
+use reqwest::{ Response };
 
 mod path_match;
 use path_match::*;
@@ -59,8 +63,12 @@ macro_rules! FormatHelper {
 
 
 macro_rules! anomaly_enum {
-    ( $( $n:expr ; $id:ident ; ( $( $arg:ty ),+ ) ( $( $bind: ident ),+ ) ;
+    ( $( $id:ident ; ( $( $arg:ty ),+ ) ( $( $bind: ident ),+ ) ;
          $header:expr ; $fmt:expr ),+ ) => (
+        /// A set of observed anomalies in the robots.txt file
+        /// Anything not directly interacted with through the rest of this api is considered anomalous, and
+        /// includes comments and ambiguously placed rule lines as well as unknown or unimplemented
+        /// directives.
         #[derive( PartialEq, Debug, Clone )]
         pub enum Anomaly{
             $(
@@ -69,14 +77,6 @@ macro_rules! anomaly_enum {
         }
 
         impl Anomaly {
-            fn order_helper( &self ) -> usize {
-                match self {
-                    $(
-                        Anomaly::$id ( $( MatchHelper!( $arg ) ),+ ) => $n,
-                    )+
-                }
-
-            }
             fn header_string( &self ) -> &str {
                 match self {
                     $(
@@ -103,37 +103,27 @@ macro_rules! anomaly_enum {
     )
 }
 
-/// A set of observed anomalies in the robots.txt file
-/// Anything not directly interacted with through the rest of this api is considered anomalous, and
-/// includes comments and ambiguously placed rule lines as well as unknown or unimplemented
-/// directives.
+
 anomaly_enum! (
-    // TODO: Comment printing still looks a bit rough
-    1 ; Comment ; ( String, String ) ( comment, context ) ;
+    Comment ; ( String, String ) ( comment, context ) ;
     "Comments:" ; "{1} \nWas commented on:\n{0}",
-    2 ; Casing ; ( String, String ) ( directive, _argument ) ;
+    Casing ; ( String, String ) ( directive, _argument ) ;
     "Non-standard casing in directives:" ; "Directive {0}:{1} has odd casing",
-    3 ; OrphanRule ; ( Rule ) ( rule ) ;
+    OrphanRule ; ( Rule ) ( rule ) ;
     "Rules found outside of User-agent sections:" ; "Orphaned rule line: {}",
-    4 ; RecursedUserAgent ; ( String ) ( agent );
+    RecursedUserAgent ; ( String ) ( agent );
     "User-agents found after a rule line:" ; "User-agent {} was found nested ambiguously and ignored",
-    5 ; RedundantWildcardUserAgent ; ( String ) ( agent ) ;
+    RedundantWildcardUserAgent ; ( String ) ( agent ) ;
     "Specified User-agents in a wildcard section:" ; "User-agent {} was mentioned after a wildcard",
-    6 ; MissSectionedDirective ; ( String, String ) ( directive, argument ) ;
+    MissSectionedDirective ; ( String, String ) ( directive, argument ) ;
     "Root directives found in a User-agent section:" ; "Directive {0}: {1} found under a User-agent",
-    7 ; UnknownDirective ; ( String, String ) ( directive, argument );
+    UnknownDirective ; ( String, String ) ( directive, argument );
     "Unimplemented or unknown directives found:" ; "Unknown directive: {0}: {1}",
-    8 ; BadArgument ; ( String, String ) ( directive, argument ) ;
+    BadArgument ; ( String, String ) ( directive, argument ) ;
     "Poorly formatted arguments:" ; "The argument {1} couldn't be parsed for a {0} directive",
-    9 ; UnknownFormat ; ( String ) ( line ) ;
+    UnknownFormat ; ( String ) ( line ) ;
     "Poorly formatted lines:" ; "Unknown line format: {}"
 );
-
-impl PartialOrd for Anomaly {
-    fn partial_cmp( &self, rhs: &Self ) -> Option< Ordering > {
-        self.order_helper( ).partial_cmp( &rhs.order_helper( ) )
-    }
-}
 
 impl Display for Anomaly {
     fn fmt( &self, f: &mut Formatter ) -> DisplayResult {
